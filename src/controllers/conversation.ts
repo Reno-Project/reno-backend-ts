@@ -1,14 +1,23 @@
 import { type Request, type Response } from "express";
 import Conversation from "../models/conversation";
+import {
+  type ConversationDTO,
+  type DeleteDTO,
+  type HealthDTO,
+} from "../types/conversation/responses";
+import { type APIResponse } from "../types/utils/api";
 
-export const getConversationHealth = (_req: Request, res: Response) => {
-  return res.json({
-    status: 200,
-    message: "Conversation route ready",
-  });
+export const getConversationHealth = (
+  _req: Request,
+  res: Response<APIResponse<HealthDTO>>
+) => {
+  return res.status(200).json({ error: null, data: { message: "Conversation route ready" } });
 };
 
-export const createConversation = async (req: Request, res: Response) => {
+export const createConversation = async (
+  req: Request,
+  res: Response<APIResponse<ConversationDTO>>
+) => {
   const {
     entityType,
     entityId,
@@ -18,7 +27,9 @@ export const createConversation = async (req: Request, res: Response) => {
   } = req.body;
 
   if (!createdBy) {
-    return res.status(400).json({ status: 400, message: "createdBy is required" });
+    return res
+      .status(400)
+      .json({ error: { message: "createdBy is required" }, data: null });
   }
 
   const conversation = await Conversation.create({
@@ -29,10 +40,15 @@ export const createConversation = async (req: Request, res: Response) => {
     createdBy,
   });
 
-  return res.status(201).json({ status: 201, data: conversation });
+  return res
+    .status(201)
+    .json({ error: null, data: conversation.toJSON() as ConversationDTO });
 };
 
-export const listConversations = async (req: Request, res: Response) => {
+export const listConversations = async (
+  req: Request,
+  res: Response<APIResponse<ConversationDTO[]>>
+) => {
   const { entityType, entityId } = req.query;
   const where: Record<string, unknown> = {};
 
@@ -40,34 +56,53 @@ export const listConversations = async (req: Request, res: Response) => {
   if (entityId) where.entityId = entityId;
 
   const conversations = await Conversation.findAll({ where });
-  return res.json({ status: 200, data: conversations });
+  return res.status(200).json({
+    error: null,
+    data: conversations.map((item) => item.toJSON() as ConversationDTO),
+  });
 };
 
-export const getConversation = async (req: Request, res: Response) => {
+export const getConversation = async (
+  req: Request,
+  res: Response<APIResponse<ConversationDTO>>
+) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) {
-    return res.status(400).json({ status: 400, message: "Invalid conversation id" });
+    return res
+      .status(400)
+      .json({ error: { message: "Invalid conversation id" }, data: null });
   }
 
   const conversation = await Conversation.findByPk(id);
 
   if (!conversation) {
-    return res.status(404).json({ status: 404, message: "Conversation not found" });
+    return res
+      .status(404)
+      .json({ error: { message: "Conversation not found" }, data: null });
   }
 
-  return res.json({ status: 200, data: conversation });
+  return res
+    .status(200)
+    .json({ error: null, data: conversation.toJSON() as ConversationDTO });
 };
 
-export const updateConversation = async (req: Request, res: Response) => {
+export const updateConversation = async (
+  req: Request,
+  res: Response<APIResponse<ConversationDTO>>
+) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) {
-    return res.status(400).json({ status: 400, message: "Invalid conversation id" });
+    return res
+      .status(400)
+      .json({ error: { message: "Invalid conversation id" }, data: null });
   }
 
   const conversation = await Conversation.findByPk(id);
 
   if (!conversation) {
-    return res.status(404).json({ status: 404, message: "Conversation not found" });
+    return res
+      .status(404)
+      .json({ error: { message: "Conversation not found" }, data: null });
   }
 
   const updates: Record<string, unknown> = {};
@@ -91,39 +126,55 @@ export const updateConversation = async (req: Request, res: Response) => {
     await conversation.update(updates);
   }
 
-  return res.json({ status: 200, data: conversation });
+  return res
+    .status(200)
+    .json({ error: null, data: conversation.toJSON() as ConversationDTO });
 };
 
-export const deleteConversation = async (req: Request, res: Response) => {
+export const deleteConversation = async (
+  req: Request,
+  res: Response<APIResponse<DeleteDTO>>
+) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) {
-    return res.status(400).json({ status: 400, message: "Invalid conversation id" });
+    return res
+      .status(400)
+      .json({ error: { message: "Invalid conversation id" }, data: null });
   }
 
   const conversation = await Conversation.findByPk(id);
 
   if (!conversation) {
-    return res.status(404).json({ status: 404, message: "Conversation not found" });
+    return res
+      .status(404)
+      .json({ error: { message: "Conversation not found" }, data: null });
   }
 
   await conversation.destroy();
-  return res.json({ status: 200, message: "Conversation deleted" });
+  return res.status(200).json({ error: null, data: { message: "Conversation deleted" } });
 };
 
-export const joinConversation = async (req: Request, res: Response) => {
+export const joinConversation = async (
+  req: Request,
+  res: Response<APIResponse<ConversationDTO>>
+) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) {
-    return res.status(400).json({ status: 400, message: "Invalid conversation id" });
+    return res
+      .status(400)
+      .json({ error: { message: "Invalid conversation id" }, data: null });
   }
 
   const { userId } = req.body;
   if (!userId) {
-    return res.status(400).json({ status: 400, message: "userId is required" });
+    return res.status(400).json({ error: { message: "userId is required" }, data: null });
   }
 
   const conversation = await Conversation.findByPk(id);
   if (!conversation) {
-    return res.status(404).json({ status: 404, message: "Conversation not found" });
+    return res
+      .status(404)
+      .json({ error: { message: "Conversation not found" }, data: null });
   }
 
   const currentMembers = Array.isArray(conversation.get("members"))
@@ -133,23 +184,32 @@ export const joinConversation = async (req: Request, res: Response) => {
   memberSet.add(String(userId));
 
   await conversation.update({ members: Array.from(memberSet) });
-  return res.json({ status: 200, data: conversation });
+  return res
+    .status(200)
+    .json({ error: null, data: conversation.toJSON() as ConversationDTO });
 };
 
-export const leaveConversation = async (req: Request, res: Response) => {
+export const leaveConversation = async (
+  req: Request,
+  res: Response<APIResponse<ConversationDTO>>
+) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) {
-    return res.status(400).json({ status: 400, message: "Invalid conversation id" });
+    return res
+      .status(400)
+      .json({ error: { message: "Invalid conversation id" }, data: null });
   }
 
   const { userId } = req.body;
   if (!userId) {
-    return res.status(400).json({ status: 400, message: "userId is required" });
+    return res.status(400).json({ error: { message: "userId is required" }, data: null });
   }
 
   const conversation = await Conversation.findByPk(id);
   if (!conversation) {
-    return res.status(404).json({ status: 404, message: "Conversation not found" });
+    return res
+      .status(404)
+      .json({ error: { message: "Conversation not found" }, data: null });
   }
 
   const currentMembers = Array.isArray(conversation.get("members"))
@@ -160,5 +220,7 @@ export const leaveConversation = async (req: Request, res: Response) => {
     .filter((member) => member !== String(userId));
 
   await conversation.update({ members: filteredMembers });
-  return res.json({ status: 200, data: conversation });
+  return res
+    .status(200)
+    .json({ error: null, data: conversation.toJSON() as ConversationDTO });
 };

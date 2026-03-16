@@ -1,17 +1,24 @@
 import { type Request, type Response } from "express";
 import Message from "../models/message";
+import { type MessageDTO } from "../types/conversation/responses";
+import { type APIResponse } from "../types/utils/api";
 
-export const createMessage = async (req: Request, res: Response) => {
+export const createMessage = async (
+  req: Request,
+  res: Response<APIResponse<MessageDTO>>
+) => {
   const { conversationId, userId, body } = req.body;
 
   if (!conversationId) {
-    return res.status(400).json({ status: 400, message: "conversationId is required" });
+    return res
+      .status(400)
+      .json({ error: { message: "conversationId is required" }, data: null });
   }
   if (!userId) {
-    return res.status(400).json({ status: 400, message: "userId is required" });
+    return res.status(400).json({ error: { message: "userId is required" }, data: null });
   }
   if (!body) {
-    return res.status(400).json({ status: 400, message: "body is required" });
+    return res.status(400).json({ error: { message: "body is required" }, data: null });
   }
 
   const message = await Message.create({
@@ -20,10 +27,13 @@ export const createMessage = async (req: Request, res: Response) => {
     body,
   });
 
-  return res.status(201).json({ status: 201, data: message });
+  return res.status(201).json({ error: null, data: message });
 };
 
-export const listMessages = async (req: Request, res: Response) => {
+export const listMessages = async (
+  req: Request,
+  res: Response<APIResponse<MessageDTO[]>>
+) => {
   const { conversation, user } = req.query;
   const where: Record<string, unknown> = {};
 
@@ -31,5 +41,5 @@ export const listMessages = async (req: Request, res: Response) => {
   if (user) where.userId = user;
 
   const messages = await Message.findAll({ where });
-  return res.json({ status: 200, data: messages });
+  return res.status(200).json({ error: null, data: messages });
 };
