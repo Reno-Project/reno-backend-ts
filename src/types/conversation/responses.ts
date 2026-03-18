@@ -24,3 +24,8 @@ export type HealthDTO = { message: string };
 export type DeleteDTO = { message: string };
 
 export type ConversationAPIResponse<T> = APIResponse<T>;
+
+export type MessageWithUserDTO = {
+  message: MessageDTO;
+  user: Record<string, unknown>;
+};

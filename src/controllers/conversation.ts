@@ -6,6 +6,11 @@ import {
   type HealthDTO,
 } from "../types/conversation/responses";
 import { type APIResponse } from "../types/utils/api";
+import {
+  createConversationSchema,
+  joinLeaveSchema,
+  updateConversationSchema,
+} from "../validation/conversation";
 
 export const getConversationHealth = (
   _req: Request,
@@ -18,19 +23,13 @@ export const createConversation = async (
   req: Request,
   res: Response<APIResponse<ConversationDTO>>
 ) => {
-  const {
-    entityType,
-    entityId,
-    parentConversationId,
-    members = [],
-    createdBy,
-  } = req.body;
-
-  if (!createdBy) {
+  const parsed = createConversationSchema.safeParse(req.body);
+  if (!parsed.success) {
     return res
       .status(400)
-      .json({ error: { message: "createdBy is required" }, data: null });
+      .json({ error: { message: "Invalid request body", details: parsed.error.flatten() }, data: null });
   }
+  const { entityType, entityId, parentConversationId, members = [], createdBy } = parsed.data;
 
   const conversation = await Conversation.create({
     entityType,
@@ -105,22 +104,13 @@ export const updateConversation = async (
       .json({ error: { message: "Conversation not found" }, data: null });
   }
 
-  const updates: Record<string, unknown> = {};
-  if (Object.prototype.hasOwnProperty.call(req.body, "entityType")) {
-    updates.entityType = req.body.entityType;
+  const parsed = updateConversationSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res
+      .status(400)
+      .json({ error: { message: "Invalid request body", details: parsed.error.flatten() }, data: null });
   }
-  if (Object.prototype.hasOwnProperty.call(req.body, "entityId")) {
-    updates.entityId = req.body.entityId;
-  }
-  if (Object.prototype.hasOwnProperty.call(req.body, "parentConversationId")) {
-    updates.parentConversationId = req.body.parentConversationId;
-  }
-  if (Object.prototype.hasOwnProperty.call(req.body, "members")) {
-    updates.members = req.body.members;
-  }
-  if (Object.prototype.hasOwnProperty.call(req.body, "createdBy")) {
-    updates.createdBy = req.body.createdBy;
-  }
+  const updates: Record<string, unknown> = parsed.data;
 
   if (Object.keys(updates).length > 0) {
     await conversation.update(updates);
@@ -165,10 +155,13 @@ export const joinConversation = async (
       .json({ error: { message: "Invalid conversation id" }, data: null });
   }
 
-  const { userId } = req.body;
-  if (!userId) {
-    return res.status(400).json({ error: { message: "userId is required" }, data: null });
+  const parsed = joinLeaveSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res
+      .status(400)
+      .json({ error: { message: "Invalid request body", details: parsed.error.flatten() }, data: null });
   }
+  const { userId } = parsed.data;
 
   const conversation = await Conversation.findByPk(id);
   if (!conversation) {
@@ -200,10 +193,13 @@ export const leaveConversation = async (
       .json({ error: { message: "Invalid conversation id" }, data: null });
   }
 
-  const { userId } = req.body;
-  if (!userId) {
-    return res.status(400).json({ error: { message: "userId is required" }, data: null });
+  const parsed = joinLeaveSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res
+      .status(400)
+      .json({ error: { message: "Invalid request body", details: parsed.error.flatten() }, data: null });
   }
+  const { userId } = parsed.data;
 
   const conversation = await Conversation.findByPk(id);
   if (!conversation) {
