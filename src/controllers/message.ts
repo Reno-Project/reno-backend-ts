@@ -27,7 +27,7 @@ export const createMessage = async (
     body,
   });
 
-  return res.status(201).json({ error: null, data: message });
+  return res.status(201).json({ error: null, data: message.toJSON() as MessageDTO });
 };
 
 export const listMessages = async (
@@ -41,5 +41,5 @@ export const listMessages = async (
   if (user) where.userId = user;
 
   const messages = await Message.findAll({ where });
-  return res.status(200).json({ error: null, data: messages });
+  return res.status(200).json({ error: null, data: messages.map(m => m.toJSON() as MessageDTO) });
 };
