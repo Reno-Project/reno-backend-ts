@@ -77,6 +77,7 @@ const swaggerDefinition = {
         tags: ["Conversation"],
         parameters: [
           { name: "entityType", in: "query", schema: { type: "string" } },
+          { name: "user_id", in: "query", schema: { type: "string" } },
           { name: "entityId", in: "query", schema: { type: "string" } },
         ],
         responses: {

@@ -11,6 +11,16 @@ export type ConversationDTO = {
   updatedAt?: string;
 };
 
+export type ConversationMemberDTO = {
+  user_id: string;
+  username: string | null;
+  profile: string | null;
+};
+
+export type ConversationWithMembersDTO = ConversationDTO & {
+  members_detail: ConversationMemberDTO[];
+};
+
 export type MessageDTO = {
   id: number;
   conversationId: number;
