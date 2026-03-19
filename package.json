@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "echo \"No tests yet\"",
+    "build": "tsc",
     "watch": "npx concurrently -k -p \"[{name}]\" -n \"Compiler,Server\" -c \"yellow.bold,cyan.bold,green.bold\" \"npm run watch-ts\" \"npm run watch-node\"",
     "watch-node": "nodemon -r dotenv/config --watch dist dist/index.js",
     "build-ts": "tsc",
