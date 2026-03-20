@@ -295,7 +295,7 @@ export const leaveConversation = async (
       .json({ error: { message: "Conversation not found" }, data: null });
   }
 
-  const currentMembers = (conversation.get("members")
+  const currentMembers = (conversation.get("members"))
     ? (JSON.parse(conversation.get("members").replace(/'/g, '"')) as unknown[])
     : [];
   const filteredMembers = currentMembers
