@@ -72,7 +72,8 @@ export const listMessages = async (
         m.updatedAt AS message_updatedAt,
         u.id AS user_id,
         u.username as username,
-        u.profile_url as profile
+        u.profile_url as profile,
+        u.role as role
       FROM [${schema}].[messages] m
       JOIN [${schema}].[users] u ON u.id = m.userId
       ${whereSql}

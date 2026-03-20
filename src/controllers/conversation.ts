@@ -91,7 +91,8 @@ export const listConversations = async (
         c.updatedAt AS conversation_updatedAt,
         u.id AS member_user_id,
         u.username AS member_username,
-        u.profile_url AS member_profile
+        u.profile_url AS member_profile,
+        u.role AS member_role
       FROM [${schema}].[conversation] c
       OUTER APPLY OPENJSON(c.members) m
       LEFT JOIN [${schema}].[users] u ON u.id = m.value
@@ -258,7 +259,7 @@ export const joinConversation = async (
   }
 
   const currentMembers = conversation.get("members")
-    ? (JSON.parse(conversation.get("members").replace(/'/g, '"')) as unknown[])
+    ? (JSON.parse((conversation.get("members") as string).replace(/'/g, '"')) as unknown[])
     : [];
   const memberSet = new Set(currentMembers.map((member) => String(member)));
   memberSet.add(String(userId));
@@ -296,7 +297,7 @@ export const leaveConversation = async (
   }
 
   const currentMembers = (conversation.get("members"))
-    ? (JSON.parse(conversation.get("members").replace(/'/g, '"')) as unknown[])
+    ? (JSON.parse((conversation.get("members") as string).replace(/'/g, '"')) as unknown[])
     : [];
   const filteredMembers = currentMembers
     .map((member) => String(member))
