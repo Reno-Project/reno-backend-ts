@@ -8,7 +8,10 @@ import messageRouter from "./routes/message";
 const app = express();
 
 app.use(cors({
-  origin: '*'
+  origin: "*",
+  methods: ['GET', 'POST', 'PUT', 'DELETE','OPTIONS'],
+  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'language'],
+  credentials: true
 }));
 app.use(express.json());
 app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));

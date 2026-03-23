@@ -20,6 +20,5 @@ export const db = {
     idle: 100000,
   },
 };
-console.log(db);
 export const logDirectory = process.env.LOG_DIR || undefined;
 
