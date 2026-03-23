@@ -4,7 +4,7 @@ const parseNumber = (value: string | undefined, fallback: number) => {
 };
 
 export const environment = process.env.NODE_ENV ?? 'development';
-export const port = parseNumber(process.env.PORT, 3000);
+export const port = parseNumber(process.env.PORT, 3001);
 export const timezone = process.env.TZ ?? 'UTC';
 
 export const db = {
@@ -20,6 +20,6 @@ export const db = {
     idle: 100000,
   },
 };
-
+console.log(db);
 export const logDirectory = process.env.LOG_DIR || undefined;
 

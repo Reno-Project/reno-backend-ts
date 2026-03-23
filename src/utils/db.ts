@@ -1,6 +1,5 @@
 import { Sequelize } from "sequelize";
 import { db as dbConfig } from "../config";
-
 const DataBase = new Sequelize(dbConfig.name, dbConfig.user, dbConfig.password, {
   host: dbConfig.host,
   dialect: "mssql",
