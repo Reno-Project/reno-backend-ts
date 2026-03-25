@@ -21,6 +21,11 @@ const Message = db.define(
       type: DataTypes.TEXT,
       allowNull: false,
     },
+    read_by: {
+      type: DataTypes.JSON,
+      allowNull: false,
+      defaultValue: [],
+    },
   },
   {
     tableName: "messages",

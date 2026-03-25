@@ -9,11 +9,13 @@ import {
   type ConversationWithMembersDTO,
   type DeleteDTO,
   type HealthDTO,
+  type ReadConversationDTO,
 } from "../types/conversation/responses";
 import { type APIResponse } from "../types/utils/api";
 import {
   createConversationSchema,
   joinLeaveSchema,
+  markReadSchema,
   updateConversationSchema,
 } from "../validation/conversation";
 
@@ -307,4 +309,43 @@ export const leaveConversation = async (
   return res
     .status(200)
     .json({ error: null, data: conversation.toJSON() as ConversationDTO });
+};
+
+export const markConversationRead = async (
+  req: Request,
+  res: Response<APIResponse<ReadConversationDTO>>
+) => {
+  const conversationId = Number(req.params.id);
+  if (!Number.isInteger(conversationId)) {
+    return res
+      .status(400)
+      .json({ error: { message: "Invalid conversation id" }, data: null });
+  }
+
+  const parsed = markReadSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res
+      .status(400)
+      .json({ error: { message: "Invalid request body", details: parsed.error.flatten() }, data: null });
+  }
+
+  const schema = dbConfig.schema || "dbo";
+  const { username } = parsed.data;
+
+  await db.query(
+    `
+      UPDATE [${schema}].[messages]
+      SET read_by = JSON_MODIFY(read_by, 'append $', :username)
+      WHERE conversationId = :conversationId
+        AND NOT EXISTS (
+          SELECT 1 FROM OPENJSON(read_by) r WHERE r.value = :username
+        )
+    `,
+    {
+      replacements: { username: String(username), conversationId },
+      type: QueryTypes.UPDATE,
+    }
+  );
+
+  return res.status(200).json({ error: null, data: { message: "Marked as read" } });
 };

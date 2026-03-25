@@ -216,6 +216,29 @@ const swaggerDefinition = {
         },
       },
     },
+    "/conversation/{id}/read": {
+      post: {
+        summary: "Mark conversation as read",
+        tags: ["Conversation"],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["username"],
+                properties: { username: { type: "string" } },
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: "OK" },
+          404: { description: "Not found" },
+        },
+      },
+    },
     "/messages": {
       get: {
         summary: "List messages",
