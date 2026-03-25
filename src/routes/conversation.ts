@@ -6,6 +6,7 @@ import {
   getConversationHealth,
   joinConversation,
   leaveConversation,
+  markConversationRead,
   listConversations,
   updateConversation,
 } from "../controllers/conversation";
@@ -20,5 +21,6 @@ conversationRouter.patch("/:id", updateConversation);
 conversationRouter.delete("/:id", deleteConversation);
 conversationRouter.post("/:id/join", joinConversation);
 conversationRouter.post("/:id/leave", leaveConversation);
+conversationRouter.post("/:id/read", markConversationRead);
 
 export default conversationRouter;

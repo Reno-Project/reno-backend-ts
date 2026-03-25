@@ -26,6 +26,7 @@ export type MessageDTO = {
   conversationId: number;
   userId: string;
   body: string;
+  readBy?: string[];
   createdAt?: string;
   updatedAt?: string;
 };
@@ -39,3 +40,5 @@ export type MessageWithUserDTO = {
   message: MessageDTO;
   user: Record<string, unknown>;
 };
+
+export type ReadConversationDTO = { message: string };

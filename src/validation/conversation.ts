@@ -19,3 +19,7 @@ export const updateConversationSchema = z.object({
 export const joinLeaveSchema = z.object({
   userId: z.string().min(1),
 });
+
+export const markReadSchema = z.object({
+  username: z.string().min(1),
+});
