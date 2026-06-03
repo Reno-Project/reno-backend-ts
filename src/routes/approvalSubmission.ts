@@ -3,6 +3,7 @@ import {
   approveAllApprovalSubmission,
   createApprovalSubmission,
   createApprovalSubmissionItem,
+  getApprovalSubmissionItem,
   listApprovalSubmissions,
   listMyApprovalSubmissions,
   rejectAllApprovalSubmission,
@@ -24,6 +25,7 @@ approvalSubmissionRouter.post(
   verifyToken,
   createApprovalSubmissionItem
 );
+approvalSubmissionRouter.get("/items/:itemId", verifyToken, getApprovalSubmissionItem);
 approvalSubmissionRouter.patch(
   "/items/:itemId/status",
   isReno,

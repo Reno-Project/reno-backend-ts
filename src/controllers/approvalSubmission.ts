@@ -93,7 +93,6 @@ async function reviewAllItems(
 
   const bodyParsed = reviewAllApprovalSubmissionSchema.safeParse(req.body);
   if (!bodyParsed.success) {
-    console.log(bodyParsed.error);
     return res
       .status(400)
       .json({ error: { message: "Invalid request body", details: bodyParsed.error.flatten() }, data: null });
@@ -465,6 +464,54 @@ export const createApprovalSubmissionItem = async (
     return res
       .status(201)
       .json({ error: null, data: item.toJSON() as ApprovalSubmissionItemDTO });
+  } catch (e) {
+    Logger.error(e);
+    return res
+      .status(500)
+      .json({ error: { message: "Something went wrong", details: e }, data: null });
+  }
+};
+
+export const getApprovalSubmissionItem = async (
+  req: Request,
+  res: Response<APIResponse<ApprovalSubmissionItemDTO>>
+) => {
+  const paramsParsed = approvalSubmissionItemIdParamSchema.safeParse(req.params);
+  if (!paramsParsed.success) {
+    return res
+      .status(400)
+      .json({ error: { message: "Invalid item id", details: paramsParsed.error.flatten() }, data: null });
+  }
+
+  if (!req.user?.id) {
+    return res.status(403).json({ error: { message: "Unauthorized" }, data: null });
+  }
+
+  const { itemId } = paramsParsed.data;
+
+  try {
+    const item = await ApprovalSubmissionItem.findByPk(itemId);
+    if (!item) {
+      return res.status(404).json({ error: { message: "Approval submission item not found" }, data: null });
+    }
+
+    const itemData = item.toJSON() as ApprovalSubmissionItemDTO;
+    const submission = await findSubmissionById(itemData.submissionId);
+    if (!submission) {
+      return res.status(404).json({ error: { message: "Approval submission not found" }, data: null });
+    }
+
+    const submissionData = submission.toJSON() as ApprovalSubmissionDTO;
+    const isReno = await verifyUser(req.user, "reno");
+    if (!isReno && submissionData.requestedBy !== Number(req.user.id)) {
+      return res
+        .status(403)
+        .json({ error: { message: "You are not allowed to access this item" }, data: null });
+    }
+
+    return res
+      .status(200)
+      .json({ error: null, data: itemData });
   } catch (e) {
     Logger.error(e);
     return res
