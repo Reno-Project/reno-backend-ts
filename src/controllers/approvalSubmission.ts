@@ -78,6 +78,35 @@ async function findSubmissionById(id: number) {
   return ApprovalSubmission.findByPk(id);
 }
 
+async function findSubmissionWithItemsById(id: number) {
+  return ApprovalSubmission.findByPk(id, {
+    include: [
+      {
+        model: ApprovalSubmissionItem,
+        as: "items",
+        required: false,
+      },
+    ],
+  });
+}
+
+function serializeSubmissionWithItems(
+  row: Awaited<ReturnType<typeof findSubmissionWithItemsById>>
+): ApprovalSubmissionWithItemsDTO | null {
+  if (!row) {
+    return null;
+  }
+
+  const json = row.toJSON() as ApprovalSubmissionDTO & {
+    items?: ApprovalSubmissionItemDTO[];
+  };
+  const { items = [], ...submission } = json;
+  return {
+    ...submission,
+    items: items.map((item) => item as ApprovalSubmissionItemDTO),
+  };
+}
+
 async function reviewAllItems(
   req: Request,
   res: Response<APIResponse<ReviewAllApprovalSubmissionDTO>>,
@@ -304,6 +333,46 @@ export const listMyApprovalSubmissions = async (
   return handleListApprovalSubmissions(res, buildListFilters(parsed.data, {
     forceRequestedBy: Number(req.user.id),
   }));
+};
+
+export const getApprovalSubmission = async (
+  req: Request,
+  res: Response<APIResponse<ApprovalSubmissionWithItemsDTO>>
+) => {
+  const paramsParsed = approvalSubmissionIdParamSchema.safeParse(req.params);
+  if (!paramsParsed.success) {
+    return res
+      .status(400)
+      .json({ error: { message: "Invalid submission id", details: paramsParsed.error.flatten() }, data: null });
+  }
+
+  if (!req.user?.id) {
+    return res.status(403).json({ error: { message: "Unauthorized" }, data: null });
+  }
+
+  const { id } = paramsParsed.data;
+
+  try {
+    const submission = await findSubmissionWithItemsById(id);
+    const data = serializeSubmissionWithItems(submission);
+    if (!data) {
+      return res.status(404).json({ error: { message: "Approval submission not found" }, data: null });
+    }
+
+    const isReno = await verifyUser(req.user, "reno");
+    if (!isReno && data.requestedBy !== Number(req.user.id)) {
+      return res
+        .status(403)
+        .json({ error: { message: "You are not allowed to access this submission" }, data: null });
+    }
+
+    return res.status(200).json({ error: null, data });
+  } catch (e) {
+    Logger.error(e);
+    return res
+      .status(500)
+      .json({ error: { message: "Something went wrong", details: e }, data: null });
+  }
 };
 
 export const approveAllApprovalSubmission = (req: Request, res: Response<APIResponse<ReviewAllApprovalSubmissionDTO>>) =>
