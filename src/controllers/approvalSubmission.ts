@@ -19,6 +19,7 @@ import {
 import { verifyUser } from "../services/user.service";
 import Logger from "../utils/logger";
 import db from "../utils/db";
+import { z } from "zod";
 import {
   approvalSubmissionIdParamSchema,
   approvalSubmissionItemIdParamSchema,
@@ -43,6 +44,34 @@ function serializeSnapshot(snapshot: unknown): string | null {
     return snapshot;
   }
   return JSON.stringify(snapshot);
+}
+
+type CreateApprovalSubmissionItemInput = z.infer<typeof createApprovalSubmissionItemSchema>;
+
+function buildItemCreateAttributes(item: CreateApprovalSubmissionItemInput): {
+  itemType: string;
+  itemId: number;
+  itemSnapshot: string | null;
+  itemNote: string | null;
+} | null {
+  if (item.itemSnapshot !== undefined) {
+    try {
+      return {
+        itemType: item.itemType,
+        itemId: item.itemId,
+        itemSnapshot: serializeSnapshot(item.itemSnapshot),
+        itemNote: item.itemNote ?? null,
+      };
+    } catch {
+      return null;
+    }
+  }
+  return {
+    itemType: item.itemType,
+    itemId: item.itemId,
+    itemSnapshot: null,
+    itemNote: item.itemNote ?? null,
+  };
 }
 
 async function findSubmissionById(id: number) {
@@ -146,7 +175,7 @@ type ListApprovalSubmissionsFilters = {
 
 function buildListFilters(
   query: ListApprovalSubmissionsQuery,
-  requestedBy?: number
+  options?: { forceRequestedBy?: number }
 ): ListApprovalSubmissionsFilters {
   const filters: ListApprovalSubmissionsFilters = {};
   if (query.status !== undefined) {
@@ -161,8 +190,10 @@ function buildListFilters(
   if (query.per_page !== undefined) {
     filters.per_page = query.per_page;
   }
-  if (requestedBy !== undefined) {
-    filters.requestedBy = requestedBy;
+  if (options?.forceRequestedBy !== undefined) {
+    filters.requestedBy = options.forceRequestedBy;
+  } else if (query.requested_by !== undefined) {
+    filters.requestedBy = query.requested_by;
   }
   return filters;
 }
@@ -271,7 +302,9 @@ export const listMyApprovalSubmissions = async (
       .json({ error: { message: "Invalid query params", details: parsed.error.flatten() }, data: null });
   }
 
-  return handleListApprovalSubmissions(res, buildListFilters(parsed.data, Number(req.user.id)));
+  return handleListApprovalSubmissions(res, buildListFilters(parsed.data, {
+    forceRequestedBy: Number(req.user.id),
+  }));
 };
 
 export const approveAllApprovalSubmission = (req: Request, res: Response<APIResponse<ReviewAllApprovalSubmissionDTO>>) =>
@@ -282,7 +315,7 @@ export const rejectAllApprovalSubmission = (req: Request, res: Response<APIRespo
 
 export const createApprovalSubmission = async (
   req: Request,
-  res: Response<APIResponse<ApprovalSubmissionDTO>>
+  res: Response<APIResponse<ApprovalSubmissionWithItemsDTO>>
 ) => {
   const parsed = createApprovalSubmissionSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -291,7 +324,7 @@ export const createApprovalSubmission = async (
       .json({ error: { message: "Invalid request body", details: parsed.error.flatten() }, data: null });
   }
 
-  const { contextType, contextId, category, requestNote } = parsed.data;
+  const { contextType, contextId, category, requestNote, items } = parsed.data;
 
   if (!req.user?.id) {
     return res
@@ -299,24 +332,70 @@ export const createApprovalSubmission = async (
       .json({ error: { message: "Unauthorized" }, data: null });
   }
 
+  const itemAttributes: {
+    itemType: string;
+    itemId: number;
+    itemSnapshot: string | null;
+    itemNote: string | null;
+  }[] = [];
+
+  if (items !== undefined) {
+    for (const item of items) {
+      const attributes = buildItemCreateAttributes(item);
+      if (attributes === null) {
+        return res
+          .status(400)
+          .json({ error: { message: "itemSnapshot must be valid JSON" }, data: null });
+      }
+      itemAttributes.push(attributes);
+    }
+  }
+
   try {
-    const submission = await ApprovalSubmission.create({
-      contextType,
-      contextId,
-      category: category ?? null,
-      status: "PENDING",
-      requestedBy: Number(req.user.id),
-      requestedAt: new Date(),
-      reviewedBy: null,
-      reviewedAt: null,
-      reviewNote: null,
-      requestNote: requestNote ?? null,
-      requestPayload: null,
+    const { submission, createdItems } = await db.transaction(async (transaction) => {
+      const createdSubmission = await ApprovalSubmission.create(
+        {
+          contextType,
+          contextId,
+          category: category ?? null,
+          status: "PENDING",
+          requestedBy: Number(req.user!.id),
+          requestedAt: new Date(),
+          reviewedBy: null,
+          reviewedAt: null,
+          reviewNote: null,
+          requestNote: requestNote ?? null,
+          requestPayload: null,
+        },
+        { transaction }
+      );
+
+      const submissionId = (createdSubmission.toJSON() as ApprovalSubmissionDTO).id;
+      const createdSubmissionItems = [];
+
+      for (const attributes of itemAttributes) {
+        const createdItem = await ApprovalSubmissionItem.create(
+          {
+            submissionId,
+            ...attributes,
+            status: "PENDING",
+            decidedAt: null,
+          },
+          { transaction }
+        );
+        createdSubmissionItems.push(createdItem);
+      }
+
+      return { submission: createdSubmission, createdItems: createdSubmissionItems };
     });
 
-    return res
-      .status(201)
-      .json({ error: null, data: submission.toJSON() as ApprovalSubmissionDTO });
+    return res.status(201).json({
+      error: null,
+      data: {
+        ...(submission.toJSON() as ApprovalSubmissionDTO),
+        items: createdItems.map((item) => item.toJSON() as ApprovalSubmissionItemDTO),
+      },
+    });
   } catch (e) {
     Logger.error(e);
     return res
@@ -369,25 +448,18 @@ export const createApprovalSubmissionItem = async (
         .json({ error: { message: "Only the submission requester can add items" }, data: null });
     }
 
-    let serializedSnapshot: string | null = null;
-    if (itemSnapshot !== undefined) {
-      try {
-        serializedSnapshot = serializeSnapshot(itemSnapshot);
-      } catch {
-        return res
-          .status(400)
-          .json({ error: { message: "itemSnapshot must be valid JSON" }, data: null });
-      }
+    const attributes = buildItemCreateAttributes({ itemType, itemId, itemSnapshot, itemNote });
+    if (attributes === null) {
+      return res
+        .status(400)
+        .json({ error: { message: "itemSnapshot must be valid JSON" }, data: null });
     }
 
     const item = await ApprovalSubmissionItem.create({
       submissionId,
-      itemType,
-      itemId,
-      itemSnapshot: serializedSnapshot,
+      ...attributes,
       status: "PENDING",
       decidedAt: null,
-      itemNote: itemNote ?? null,
     });
 
     return res

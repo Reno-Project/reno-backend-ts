@@ -329,6 +329,7 @@ const swaggerDefinition = {
             },
           },
           { name: "category", in: "query", schema: { type: "string" } },
+          { name: "requested_by", in: "query", schema: { type: "integer" } },
           {
             name: "page",
             in: "query",
@@ -364,6 +365,19 @@ const swaggerDefinition = {
                   contextId: { type: "integer" },
                   category: { type: "string" },
                   requestNote: { type: "string" },
+                  items: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["itemType", "itemId"],
+                      properties: {
+                        itemType: { type: "string" },
+                        itemId: { type: "integer" },
+                        itemSnapshot: { type: "object" },
+                        itemNote: { type: "string" },
+                      },
+                    },
+                  },
                 },
               },
             },

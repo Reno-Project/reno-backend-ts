@@ -13,24 +13,26 @@ const approvalSubmissionStatusEnum = z.enum([
 export const listApprovalSubmissionsQuerySchema = z.object({
   status: approvalSubmissionStatusEnum.optional(),
   category: z.string().min(1).optional(),
+  requested_by: z.coerce.number().int().positive().optional(),
   page: z.coerce.number().int().positive().optional(),
   per_page: z.coerce.number().int().positive().max(100).optional(),
 });
 
 export type ListApprovalSubmissionsQuery = z.infer<typeof listApprovalSubmissionsQuerySchema>;
 
-export const createApprovalSubmissionSchema = z.object({
-  contextType: z.string().min(1),
-  contextId: z.number().int(),
-  category: z.string().min(1).optional(),
-  requestNote: z.string().optional(),
-});
-
 export const createApprovalSubmissionItemSchema = z.object({
   itemType: z.string().min(1),
   itemId: z.number().int(),
   itemSnapshot: z.union([jsonValue, z.string().min(1)]).optional(),
   itemNote: z.string().optional(),
+});
+
+export const createApprovalSubmissionSchema = z.object({
+  contextType: z.string().min(1),
+  contextId: z.number().int(),
+  category: z.string().min(1).optional(),
+  requestNote: z.string().optional(),
+  items: z.array(createApprovalSubmissionItemSchema).optional(),
 });
 
 const renoReviewStatuses = z.enum(["APPROVED", "PARTIALLY_APPROVED", "REJECTED"]);
