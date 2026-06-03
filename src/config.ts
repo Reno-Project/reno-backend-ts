@@ -22,3 +22,10 @@ export const db = {
 };
 export const logDirectory = process.env.LOG_DIR || undefined;
 
+export const jwtSecret =
+  process.env.JWT_SECRET || process.env.SECRET_KEY || process.env.TOKEN_SECRET || "";
+
+export const leanWebhookSecret = process.env.LEAN_WEBHOOK_SECRET || "";
+
+export const apiV1 = process.env.API_V1 || "";
+
