@@ -315,6 +315,39 @@ const swaggerDefinition = {
       },
     },
     "/approval-submissions": {
+      get: {
+        summary: "List all approval submissions (Reno only)",
+        tags: ["Approval Submissions"],
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: "status",
+            in: "query",
+            schema: {
+              type: "string",
+              enum: ["PENDING", "APPROVED", "REJECTED", "PARTIALLY_APPROVED", "CANCELLED"],
+            },
+          },
+          { name: "category", in: "query", schema: { type: "string" } },
+          {
+            name: "page",
+            in: "query",
+            schema: { type: "integer" },
+            description: "Optional. Use together with per_page; omit both to return all results.",
+          },
+          {
+            name: "per_page",
+            in: "query",
+            schema: { type: "integer", maximum: 100 },
+            description: "Optional. Use together with page; omit both to return all results.",
+          },
+        ],
+        responses: {
+          200: { description: "List with nested items" },
+          400: { description: "Invalid query params" },
+          403: { description: "Forbidden" },
+        },
+      },
       post: {
         summary: "Create approval submission",
         tags: ["Approval Submissions"],
@@ -345,6 +378,41 @@ const swaggerDefinition = {
               },
             },
           },
+          403: { description: "Unauthorized" },
+        },
+      },
+    },
+    "/approval-submissions/mine": {
+      get: {
+        summary: "List approval submissions requested by the current user",
+        tags: ["Approval Submissions"],
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: "status",
+            in: "query",
+            schema: {
+              type: "string",
+              enum: ["PENDING", "APPROVED", "REJECTED", "PARTIALLY_APPROVED", "CANCELLED"],
+            },
+          },
+          { name: "category", in: "query", schema: { type: "string" } },
+          {
+            name: "page",
+            in: "query",
+            schema: { type: "integer" },
+            description: "Optional. Use together with per_page; omit both to return all results.",
+          },
+          {
+            name: "per_page",
+            in: "query",
+            schema: { type: "integer", maximum: 100 },
+            description: "Optional. Use together with page; omit both to return all results.",
+          },
+        ],
+        responses: {
+          200: { description: "List with nested items" },
+          400: { description: "Invalid query params" },
           403: { description: "Unauthorized" },
         },
       },

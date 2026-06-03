@@ -37,3 +37,17 @@ export type ReviewAllApprovalSubmissionDTO = {
   submission: ApprovalSubmissionDTO;
   items: ApprovalSubmissionItemDTO[];
 };
+
+export type ApprovalSubmissionWithItemsDTO = ApprovalSubmissionDTO & {
+  items: ApprovalSubmissionItemDTO[];
+};
+
+export type ListApprovalSubmissionsDTO = {
+  submissions: ApprovalSubmissionWithItemsDTO[];
+  pagination: {
+    page: number;
+    per_page: number;
+    total: number;
+    total_pages: number;
+  };
+};

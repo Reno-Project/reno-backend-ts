@@ -2,6 +2,23 @@ import { z } from "zod";
 
 const jsonValue = z.union([z.record(z.unknown()), z.array(z.unknown())]);
 
+const approvalSubmissionStatusEnum = z.enum([
+  "PENDING",
+  "APPROVED",
+  "REJECTED",
+  "PARTIALLY_APPROVED",
+  "CANCELLED",
+]);
+
+export const listApprovalSubmissionsQuerySchema = z.object({
+  status: approvalSubmissionStatusEnum.optional(),
+  category: z.string().min(1).optional(),
+  page: z.coerce.number().int().positive().optional(),
+  per_page: z.coerce.number().int().positive().max(100).optional(),
+});
+
+export type ListApprovalSubmissionsQuery = z.infer<typeof listApprovalSubmissionsQuerySchema>;
+
 export const createApprovalSubmissionSchema = z.object({
   contextType: z.string().min(1),
   contextId: z.number().int(),

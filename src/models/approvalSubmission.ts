@@ -1,4 +1,5 @@
 import { DataTypes } from "sequelize";
+import ApprovalSubmissionItem from "./approvalSubmissionItem";
 import db from "../utils/db";
 
 const ApprovalSubmission = db.define(
@@ -69,5 +70,10 @@ const ApprovalSubmission = db.define(
     timestamps: false,
   }
 );
+
+ApprovalSubmission.hasMany(ApprovalSubmissionItem, {
+  foreignKey: "submissionId",
+  as: "items",
+});
 
 export default ApprovalSubmission;

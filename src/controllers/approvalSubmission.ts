@@ -1,4 +1,5 @@
 import { type Request, type Response } from "express";
+import { type WhereOptions } from "sequelize";
 import ApprovalSubmission from "../models/approvalSubmission";
 import ApprovalSubmissionItem from "../models/approvalSubmissionItem";
 import {
@@ -6,6 +7,8 @@ import {
   type ApprovalSubmissionItemDTO,
   type ApprovalSubmissionItemStatus,
   type ApprovalSubmissionStatus,
+  type ApprovalSubmissionWithItemsDTO,
+  type ListApprovalSubmissionsDTO,
   type ReviewAllApprovalSubmissionDTO,
 } from "../types/approvalSubmission/responses";
 import { type APIResponse } from "../types/utils/api";
@@ -21,6 +24,8 @@ import {
   approvalSubmissionItemIdParamSchema,
   createApprovalSubmissionItemSchema,
   createApprovalSubmissionSchema,
+  listApprovalSubmissionsQuerySchema,
+  type ListApprovalSubmissionsQuery,
   reviewAllApprovalSubmissionSchema,
   submissionIdParamSchema,
   updateApprovalSubmissionItemStatusSchema,
@@ -130,6 +135,144 @@ async function reviewAllItems(
       .json({ error: { message: "Something went wrong", details: e }, data: null });
   }
 }
+
+type ListApprovalSubmissionsFilters = {
+  status?: ApprovalSubmissionStatus;
+  category?: string;
+  page?: number;
+  per_page?: number;
+  requestedBy?: number;
+};
+
+function buildListFilters(
+  query: ListApprovalSubmissionsQuery,
+  requestedBy?: number
+): ListApprovalSubmissionsFilters {
+  const filters: ListApprovalSubmissionsFilters = {};
+  if (query.status !== undefined) {
+    filters.status = query.status;
+  }
+  if (query.category !== undefined) {
+    filters.category = query.category;
+  }
+  if (query.page !== undefined) {
+    filters.page = query.page;
+  }
+  if (query.per_page !== undefined) {
+    filters.per_page = query.per_page;
+  }
+  if (requestedBy !== undefined) {
+    filters.requestedBy = requestedBy;
+  }
+  return filters;
+}
+
+async function queryApprovalSubmissionsList(
+  filters: ListApprovalSubmissionsFilters
+): Promise<ListApprovalSubmissionsDTO> {
+  const { status, category, page, per_page, requestedBy } = filters;
+  const isPaginated = page !== undefined && per_page !== undefined;
+  const where: WhereOptions = {};
+
+  if (status !== undefined) {
+    where.status = status;
+  }
+  if (category !== undefined) {
+    where.category = category;
+  }
+  if (requestedBy !== undefined) {
+    where.requestedBy = requestedBy;
+  }
+
+  const { count, rows } = await ApprovalSubmission.findAndCountAll({
+    where,
+    ...(isPaginated ? { limit: per_page, offset: (page - 1) * per_page } : {}),
+    order: [["id", "DESC"]],
+    include: [
+      {
+        model: ApprovalSubmissionItem,
+        as: "items",
+        required: false,
+      },
+    ],
+    distinct: true,
+  });
+
+  const submissions: ApprovalSubmissionWithItemsDTO[] = rows.map((row) => {
+    const json = row.toJSON() as ApprovalSubmissionDTO & {
+      items?: ApprovalSubmissionItemDTO[];
+    };
+    const { items = [], ...submission } = json;
+    return {
+      ...submission,
+      items: items.map((item) => item as ApprovalSubmissionItemDTO),
+    };
+  });
+
+  const total = count;
+  const pagination = isPaginated
+    ? {
+        page,
+        per_page,
+        total,
+        total_pages: total === 0 ? 0 : Math.ceil(total / per_page),
+      }
+    : {
+        page: 1,
+        per_page: total,
+        total,
+        total_pages: total === 0 ? 0 : 1,
+      };
+
+  return { submissions, pagination };
+}
+
+async function handleListApprovalSubmissions(
+  res: Response<APIResponse<ListApprovalSubmissionsDTO>>,
+  filters: ListApprovalSubmissionsFilters
+) {
+  try {
+    const data = await queryApprovalSubmissionsList(filters);
+    return res.status(200).json({ error: null, data });
+  } catch (e) {
+    Logger.error(e);
+    return res
+      .status(500)
+      .json({ error: { message: "Something went wrong", details: e }, data: null });
+  }
+}
+
+export const listApprovalSubmissions = async (
+  req: Request,
+  res: Response<APIResponse<ListApprovalSubmissionsDTO>>
+) => {
+  const parsed = listApprovalSubmissionsQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    return res
+      .status(400)
+      .json({ error: { message: "Invalid query params", details: parsed.error.flatten() }, data: null });
+  }
+
+  return handleListApprovalSubmissions(res, buildListFilters(parsed.data));
+};
+
+export const listMyApprovalSubmissions = async (
+  req: Request,
+  res: Response<APIResponse<ListApprovalSubmissionsDTO>>
+) => {
+  if (!req.user?.id) {
+    return res.status(403).json({ error: { message: "Unauthorized" }, data: null });
+  }
+
+  const parsed = listApprovalSubmissionsQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    return res
+      .status(400)
+      .json({ error: { message: "Invalid query params", details: parsed.error.flatten() }, data: null });
+  }
+
+  return handleListApprovalSubmissions(res, buildListFilters(parsed.data, Number(req.user.id)));
+};
 
 export const approveAllApprovalSubmission = (req: Request, res: Response<APIResponse<ReviewAllApprovalSubmissionDTO>>) =>
   reviewAllItems(req, res, "APPROVED", "APPROVED");
