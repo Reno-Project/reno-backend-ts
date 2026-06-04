@@ -22,6 +22,14 @@ const User = db.define(
       allowNull: false,
       defaultValue: 0,
     },
+    email: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    username: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
   },
   {
     tableName: "users",
