@@ -33,7 +33,7 @@ export type ApprovalSubmissionItemDTO = {
   id: number;
   submissionId: number;
   itemType: string;
-  itemId: number;
+  itemId: string;
   itemSnapshot: string | null;
   status: ApprovalSubmissionItemStatus;
   decidedAt: string | null;

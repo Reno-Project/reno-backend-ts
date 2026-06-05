@@ -34,7 +34,7 @@ All endpoints return `{ error, data }`. Send `Authorization: Bearer <token>` unl
   "items": [
     {
       "itemType": "string",
-      "itemId": 123,
+      "itemId": "abc-123",
       "itemSnapshot": {},
       "itemNote": "string"
     }
@@ -47,7 +47,7 @@ All endpoints return `{ error, data }`. Send `Authorization: Bearer <token>` unl
 ```json
 {
   "itemType": "string",
-  "itemId": 123,
+  "itemId": "abc-123",
   "itemSnapshot": {},
   "itemNote": "string"
 }
@@ -133,7 +133,7 @@ Nested on `requestedBy` (joined from `users` via `requested_by`).
   "id": 1,
   "submissionId": 42,
   "itemType": "string",
-  "itemId": 123,
+  "itemId": "abc-123",
   "itemSnapshot": "string | null",
   "status": "PENDING | APPROVED | REJECTED",
   "decidedAt": "ISO8601 | null",

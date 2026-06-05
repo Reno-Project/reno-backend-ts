@@ -22,7 +22,7 @@ export type ListApprovalSubmissionsQuery = z.infer<typeof listApprovalSubmission
 
 export const createApprovalSubmissionItemSchema = z.object({
   itemType: z.string().min(1),
-  itemId: z.number().int(),
+  itemId: z.string().min(1),
   itemSnapshot: z.union([jsonValue, z.string().min(1)]).optional(),
   itemNote: z.string().optional(),
 });

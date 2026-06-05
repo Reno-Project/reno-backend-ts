@@ -84,7 +84,7 @@ const swaggerDefinition = {
           id: { type: "integer" },
           submissionId: { type: "integer" },
           itemType: { type: "string" },
-          itemId: { type: "integer" },
+          itemId: { type: "string" },
           itemSnapshot: { type: "string", nullable: true },
           status: { type: "string" },
           decidedAt: { type: "string", nullable: true },
@@ -372,7 +372,7 @@ const swaggerDefinition = {
                       required: ["itemType", "itemId"],
                       properties: {
                         itemType: { type: "string" },
-                        itemId: { type: "integer" },
+                        itemId: { type: "string" },
                         itemSnapshot: { type: "object" },
                         itemNote: { type: "string" },
                       },
@@ -569,7 +569,7 @@ const swaggerDefinition = {
                 required: ["itemType", "itemId"],
                 properties: {
                   itemType: { type: "string" },
-                  itemId: { type: "integer" },
+                  itemId: { type: "string" },
                   itemSnapshot: { type: "object" },
                   itemNote: { type: "string" },
                 },

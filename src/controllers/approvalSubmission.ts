@@ -100,7 +100,7 @@ type CreateApprovalSubmissionItemInput = z.infer<typeof createApprovalSubmission
 
 function buildItemCreateAttributes(item: CreateApprovalSubmissionItemInput): {
   itemType: string;
-  itemId: number;
+  itemId: string;
   itemSnapshot: string | null;
   itemNote: string | null;
 } | null {
@@ -198,6 +198,10 @@ async function syncSubmissionStatusFromItems(
     { transaction }
   );
 
+  if(allApproved) {
+    void notifyApprovalSubmissionStatusChange(submission.id, "APPROVED");
+  }
+
   return nextStatus;
 }
 
@@ -271,7 +275,7 @@ async function reviewAllItems(
     void notifyApprovalSubmissionStatusChange(id, submissionStatus);
     for (const item of items) {
       const itemData = item.toJSON() as ApprovalSubmissionItemDTO;
-      void notifyApprovalSubmissionItemStatusChange(itemData.id, itemStatus);
+      // void notifyApprovalSubmissionItemStatusChange(itemData.id, itemStatus);
     }
 
     const submissionWithDetails = await findSubmissionWithItemsById(id);
@@ -490,7 +494,7 @@ export const createApprovalSubmission = async (
 
   const itemAttributes: {
     itemType: string;
-    itemId: number;
+    itemId: string;
     itemSnapshot: string | null;
     itemNote: string | null;
   }[] = [];
@@ -745,7 +749,7 @@ export const updateApprovalSubmissionItemStatus = async (
       await submission.reload();
     }
 
-    void notifyApprovalSubmissionItemStatusChange(itemId, status);
+    // void notifyApprovalSubmissionItemStatusChange(itemId, status);
     if (submissionStatusChange !== null) {
       void notifyApprovalSubmissionStatusChange(itemData.submissionId, submissionStatusChange);
     }
