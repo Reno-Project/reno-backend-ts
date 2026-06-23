@@ -2,6 +2,7 @@ import { type Request, type Response } from "express";
 import { QueryTypes } from "sequelize";
 import Message from "../models/message";
 import { db as dbConfig } from "../config";
+import Logger from "../utils/logger";
 import db from "../utils/db";
 import { type MessageDTO, type MessageWithUserDTO } from "../types/conversation/responses";
 import { type APIResponse } from "../types/utils/api";
@@ -19,13 +20,19 @@ export const createMessage = async (
   }
   const { conversationId, userId, body } = parsed.data;
 
-  const message = await Message.create({
-    conversationId,
-    userId,
-    body,
-  });
-
-  return res.status(201).json({ error: null, data: message.toJSON() as MessageDTO });
+  try {
+    const message = await Message.create({
+      conversationId,
+      userId,
+      body,
+      read_by: [],
+    });
+    return res.status(200).json({ error: null, data: message.toJSON() as MessageDTO });
+  } catch(e) {
+    Logger.error(e);
+    return res.status(500).json({ error: { message: "Something went wrong", details: e }, data: null });
+  }
+ 
 };
 
 export const listMessages = async (
@@ -68,6 +75,7 @@ export const listMessages = async (
         m.conversationId AS message_conversationId,
         m.userId AS message_userId,
         m.body AS message_body,
+        m.read_by AS message_readBy,
         m.createdAt AS message_createdAt,
         m.updatedAt AS message_updatedAt,
         u.id AS user_id,
@@ -89,6 +97,17 @@ export const listMessages = async (
       userId: String(row.message_userId),
       body: String(row.message_body),
     };
+    if (row.message_readBy !== undefined) {
+      if (Array.isArray(row.message_readBy)) {
+        message.readBy = row.message_readBy as string[];
+      } else {
+        try {
+          message.readBy = JSON.parse(String(row.message_readBy)) as string[];
+        } catch {
+          message.readBy = [];
+        }
+      }
+    }
     if (row.message_createdAt !== undefined) {
       message.createdAt = row.message_createdAt as string;
     }
