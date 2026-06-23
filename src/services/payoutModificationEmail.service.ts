@@ -1,9 +1,11 @@
-import { buildContractorPaymentsUrl } from "../config";
+import { QueryTypes } from "sequelize";
+import { buildContractorPaymentsUrl, db as dbConfig } from "../config";
 import User from "../models/user";
 import { getPayoutManagerEmail } from "./approvalReviewer.service";
 import { getEmailTemplate, sendSmtpEmail } from "./mail.service";
 import type { ApprovalSubmissionWithItemsDTO } from "../types/approvalSubmission/responses";
 import Logger from "../utils/logger";
+import db from "../utils/db";
 
 const PAYOUT_MODIFICATION_TEMPLATE_SLUG = "payout-modification-request";
 
@@ -129,6 +131,38 @@ function resolveRequesterDisplayName(
   return "User";
 }
 
+async function getProjectName(projectId: number): Promise<string> {
+  const schema = dbConfig.schema || "dbo";
+  const rows = (await db.query(
+    `SELECT name FROM [${schema}].[project] WHERE id = :projectId`,
+    { replacements: { projectId }, type: QueryTypes.SELECT }
+  )) as Array<{ name: string | null }>;
+
+  const name = rows[0]?.name;
+  return typeof name === "string" && name.trim().length > 0 ? name.trim() : `Project #${projectId}`;
+}
+
+function resolvePayoutName(items: ApprovalSubmissionWithItemsDTO["items"]): string {
+  const names: string[] = [];
+
+  for (const item of items) {
+    const parsed = parseItemSnapshot(item.itemSnapshot);
+    const before = parsed?.before ?? {};
+    const after = parsed?.after ?? {};
+
+    const afterName = typeof after.payoutName === "string" ? after.payoutName.trim() : "";
+    const beforeName = typeof before.payoutName === "string" ? before.payoutName.trim() : "";
+    const name = afterName || beforeName || item.itemId;
+    names.push(name);
+  }
+
+  if (names.length === 0) {
+    return "—";
+  }
+
+  return [...new Set(names)].join(", ");
+}
+
 export async function notifyPayoutModificationRequest(
   submission: ApprovalSubmissionWithItemsDTO
 ): Promise<void> {
@@ -153,10 +187,14 @@ export async function notifyPayoutModificationRequest(
   const requesterEmail = requesterJson?.email?.trim() ?? "";
   const requesterName = resolveRequesterDisplayName(requesterJson?.username, requesterEmail);
 
+  const projectName = await getProjectName(submission.contextId);
+  const payoutName = resolvePayoutName(submission.items);
+
   const replacements: Record<string, string> = {
     RequesterName: requesterName,
     RequesterEmail: requesterEmail || "—",
-    SubmissionId: String(submission.id),
+    PayoutName: payoutName,
+    ProjectName: projectName,
     RequestedAt: formatRequestedAt(submission.requestedAt),
     RequestNote: submission.requestNote?.trim() || "—",
     ReviewLink: reviewLink,
