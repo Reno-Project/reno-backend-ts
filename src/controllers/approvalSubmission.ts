@@ -26,6 +26,7 @@ import {
   notifyApprovalSubmissionItemStatusChange,
   notifyApprovalSubmissionStatusChange,
 } from "../services/approvalSubmissionWebhook.service";
+import { notifyPayoutModificationRequest } from "../services/payoutModificationEmail.service";
 import Logger from "../utils/logger";
 import db from "../utils/db";
 import { z } from "zod";
@@ -658,6 +659,11 @@ export const createApprovalSubmission = async (
     });
 
     const submissionWithDetails = await findSubmissionWithItemsById(submissionId);
+
+    if (category === "PAYOUT_EDIT" && submissionWithDetails) {
+      const data = serializeSubmissionWithItems(submissionWithDetails)!;
+      void notifyPayoutModificationRequest(data).catch(Logger.error);
+    }
 
     return res.status(201).json({
       error: null,
