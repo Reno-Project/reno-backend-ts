@@ -4,20 +4,91 @@ Base path: `/approval-submissions`
 
 All endpoints return `{ error, data }`. Send `Authorization: Bearer <token>` unless noted.
 
+## Category-based reviewers
+
+Who may list (inbox), read (non-requester), and approve/reject is determined by submission **`category`**. Configured in [`src/config/approvalReviewers.ts`](../src/config/approvalReviewers.ts).
+
+| `category` | Reviewer |
+|------------|----------|
+| `START_PROJECT_ADMIN` | Reno admin (`RENO_ADMIN` / `RENO_SUPER_ADMIN` in `user_roles`) |
+| `PAYOUT_EDIT` | User whose email matches `app_config.config_value` where `config_key` is `PAYOUT_MANAGER` or `PAYOUT_APPROVAL_MAIL` |
+| *(unmapped)* | Any user with `reno` role (legacy) |
+
+Submit (`POST /`) is open to any authenticated user. Requesters can always read/cancel their own submissions.
+
+---
+
 ## Routes
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/` | Reno | List all submissions with nested items. Optional query: `status`, `category`, `requested_by`, `page`, `per_page` (max 100). Omit `page`/`per_page` to return all results. |
-| `GET` | `/user-submissions` | Bearer | List submissions requested by the current user. Same query params as above except `requested_by` is ignored. |
-| `GET` | `/:id` | Bearer (Reno or requester only) | Fetch a single submission by ID, including its items. |
-| `POST` | `/` | Bearer | Create a submission (`PENDING`). Requires `contextType`, `contextId`; optional `category`, `requestNote`, `items[]`. |
-| `PATCH` | `/:id/status` | Bearer | Update submission status. Requester may set `CANCELLED`; Reno may set `APPROVED`, `PARTIALLY_APPROVED`, or `REJECTED` (optional `reviewNote`). Submission must be `PENDING`. |
-| `POST` | `/:id/approve-all` | Reno | Approve all items and the submission in one transaction. Optional body: `reviewNote`. Submission must be `PENDING`. |
-| `POST` | `/:id/reject-all` | Reno | Reject all items and the submission in one transaction. Optional body: `reviewNote`. Submission must be `PENDING`. |
-| `POST` | `/:submissionId/items` | Bearer (requester only) | Add an item to a pending submission. Requires `itemType`, `itemId`; optional `itemSnapshot`, `itemNote`. |
-| `GET` | `/items/:itemId` | Bearer (Reno or requester only) | Fetch a single submission item by ID. |
-| `PATCH` | `/items/:itemId/status` | Reno | Review a single pending item. Body requires `status`: `APPROVED` or `REJECTED`. Parent submission must be `PENDING` or `PARTIALLY_APPROVED`. After each review: if every item is `APPROVED`, the submission becomes `APPROVED`; if at least one item is `APPROVED` but not all, it becomes `PARTIALLY_APPROVED` (sets `reviewedBy` / `reviewedAt` and fires the submission webhook when the status changes). |
+| `GET` | `/` | Bearer (reviewer) | Reviewer inbox. Returns submissions for categories the caller can review. Optional query: `status`, `category`, `page`, `per_page`. |
+| `GET` | `/user-submissions` | Bearer | Submissions requested by the current user. |
+| `GET` | `/:id` | Bearer | Fetch submission + items. Requester or category reviewer. |
+| `POST` | `/` | Bearer | Create submission (`PENDING`). Requires `contextType`, `contextId`; optional `category`, `requestNote`, `items[]`. |
+| `PATCH` | `/:id/status` | Bearer | Requester: `CANCELLED`. Reviewer: `APPROVED`, `PARTIALLY_APPROVED`, `REJECTED`. |
+| `POST` | `/:id/approve-all` | Bearer (category reviewer) | Approve all items and submission. |
+| `POST` | `/:id/reject-all` | Bearer (category reviewer) | Reject all items and submission. |
+| `POST` | `/:submissionId/items` | Bearer (requester) | Add item to pending submission. |
+| `GET` | `/items/:itemId` | Bearer | Fetch item. Requester or category reviewer. |
+| `PATCH` | `/items/:itemId/status` | Bearer (category reviewer) | Approve/reject item. Auto-syncs submission to `PARTIALLY_APPROVED` / `APPROVED`. |
+
+---
+
+## Workflows
+
+### `PAYOUT_EDIT` — contractor payout field changes
+
+**Reviewer:** payout manager (`PAYOUT_MANAGER` in `app_config`).
+
+```json
+POST /approval-submissions
+{
+  "contextType": "contractor_payout",
+  "contextId": 42,
+  "category": "PAYOUT_EDIT",
+  "requestNote": "Client approved higher amount",
+  "items": [{
+    "itemType": "contractor_payout",
+    "itemId": "42",
+    "itemSnapshot": {
+      "before": {
+        "payoutName": "March draw",
+        "due_date": "2026-03-01",
+        "amount": 5000,
+        "status": "pending"
+      },
+      "after": {
+        "amount": 5500,
+        "due_date": "2026-03-15"
+      }
+    }
+  }]
+}
+```
+
+`itemSnapshot.after` may only include: `payoutName`, `due_date`, `amount`, `status` (at least one required).
+
+On approve, API_V1 applies the patch — see [api-v1-approval-webhooks.md](./api-v1-approval-webhooks.md).
+
+### `START_PROJECT_ADMIN` — start project
+
+**Reviewer:** Reno admin (`isRenoAdmin`).
+
+```json
+POST /approval-submissions
+{
+  "contextType": "project",
+  "contextId": 100,
+  "category": "START_PROJECT_ADMIN",
+  "requestNote": "Ready to start",
+  "items": [{
+    "itemType": "project",
+    "itemId": "100",
+    "itemSnapshot": {}
+  }]
+}
+```
 
 ---
 
@@ -42,19 +113,6 @@ All endpoints return `{ error, data }`. Send `Authorization: Bearer <token>` unl
 }
 ```
 
-### `POST /:submissionId/items`
-
-```json
-{
-  "itemType": "string",
-  "itemId": "abc-123",
-  "itemSnapshot": {},
-  "itemNote": "string"
-}
-```
-
-`itemSnapshot` may be a JSON object/array or a JSON string.
-
 ### `PATCH /:id/status`
 
 Requester cancelling:
@@ -63,7 +121,7 @@ Requester cancelling:
 { "status": "CANCELLED" }
 ```
 
-Reno reviewing:
+Reviewer:
 
 ```json
 {
@@ -72,31 +130,17 @@ Reno reviewing:
 }
 ```
 
-Allowed Reno values: `APPROVED`, `PARTIALLY_APPROVED`, `REJECTED`.
-
-### `POST /:id/approve-all` / `POST /:id/reject-all`
-
-```json
-{
-  "reviewNote": "string"
-}
-```
-
 ### `PATCH /items/:itemId/status`
 
 ```json
-{
-  "status": "APPROVED"
-}
+{ "status": "APPROVED" }
 ```
 
 ---
 
 ## Response shapes
 
-### `ApprovalSubmissionRequesterDTO`
-
-Nested on `requestedBy` (joined from `users` via `requested_by`).
+### `ApprovalSubmissionRequesterDTO` (`requestedBy`)
 
 ```json
 {
@@ -112,10 +156,10 @@ Nested on `requestedBy` (joined from `users` via `requested_by`).
 ```json
 {
   "id": 42,
-  "category": "string | null",
-  "contextType": "string",
-  "contextId": 1,
-  "status": "PENDING | APPROVED | REJECTED | PARTIALLY_APPROVED | CANCELLED",
+  "category": "PAYOUT_EDIT",
+  "contextType": "contractor_payout",
+  "contextId": 42,
+  "status": "PENDING",
   "requestedBy": { "...ApprovalSubmissionRequesterDTO" },
   "requestedAt": "ISO8601",
   "requestNote": "string | null",
@@ -132,56 +176,14 @@ Nested on `requestedBy` (joined from `users` via `requested_by`).
 {
   "id": 1,
   "submissionId": 42,
-  "itemType": "string",
-  "itemId": "abc-123",
+  "itemType": "contractor_payout",
+  "itemId": "42",
   "itemSnapshot": "string | null",
-  "status": "PENDING | APPROVED | REJECTED",
+  "status": "PENDING",
   "decidedAt": "ISO8601 | null",
   "itemNote": "string | null"
 }
 ```
-
-### `GET /`, `GET /user-submissions` — `ListApprovalSubmissionsDTO`
-
-```json
-{
-  "error": null,
-  "data": {
-    "submissions": [
-      {
-        "...ApprovalSubmissionDTO fields",
-        "items": ["...ApprovalSubmissionItemDTO"]
-      }
-    ],
-    "pagination": {
-      "page": 1,
-      "per_page": 20,
-      "total": 100,
-      "total_pages": 5
-    }
-  }
-}
-```
-
-### `GET /:id`, `POST /` — `ApprovalSubmissionWithItemsDTO`
-
-Submission fields plus `items: ApprovalSubmissionItemDTO[]`.
-
-### `GET /items/:itemId`, `POST /:submissionId/items`, `PATCH /items/:itemId/status` — `ApprovalSubmissionItemDTO`
-
-### `POST /:id/approve-all`, `POST /:id/reject-all` — `ReviewAllApprovalSubmissionDTO`
-
-```json
-{
-  "error": null,
-  "data": {
-    "submission": { "...ApprovalSubmissionDTO" },
-    "items": ["...ApprovalSubmissionItemDTO"]
-  }
-}
-```
-
-### `PATCH /:id/status` — `ApprovalSubmissionDTO`
 
 ---
 
@@ -189,9 +191,9 @@ Submission fields plus `items: ApprovalSubmissionItemDTO[]`.
 
 | Code | When |
 |------|------|
-| `200` | Success (GET, PATCH, approve-all, reject-all) |
-| `201` | Created (POST `/`, POST `/:submissionId/items`) |
-| `400` | Invalid params, body, or business rule (e.g. submission not `PENDING`) |
-| `403` | Missing/invalid token, wrong role, or not the requester |
-| `404` | Submission or item not found |
+| `200` | Success |
+| `201` | Created |
+| `400` | Invalid params/body or category validation failed |
+| `403` | Unauthorized or not allowed to review this category |
+| `404` | Not found |
 | `500` | Server error |
