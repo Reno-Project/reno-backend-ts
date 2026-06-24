@@ -11,17 +11,17 @@ import {
   updateApprovalSubmissionItemStatus,
   updateApprovalSubmissionStatus,
 } from "../controllers/approvalSubmission";
-import { isReno, verifyToken } from "../middleware/auth";
+import { verifyToken } from "../middleware/auth";
 
 const approvalSubmissionRouter = Router();
 
-approvalSubmissionRouter.get("/", isReno, listApprovalSubmissions);
+approvalSubmissionRouter.get("/", verifyToken, listApprovalSubmissions);
 approvalSubmissionRouter.get("/user-submissions", verifyToken, listMyApprovalSubmissions);
 approvalSubmissionRouter.get("/:id", verifyToken, getApprovalSubmission);
 approvalSubmissionRouter.post("/", verifyToken, createApprovalSubmission);
 approvalSubmissionRouter.patch("/:id/status", verifyToken, updateApprovalSubmissionStatus);
-approvalSubmissionRouter.post("/:id/approve-all", isReno, approveAllApprovalSubmission);
-approvalSubmissionRouter.post("/:id/reject-all", isReno, rejectAllApprovalSubmission);
+approvalSubmissionRouter.post("/:id/approve-all", verifyToken, approveAllApprovalSubmission);
+approvalSubmissionRouter.post("/:id/reject-all", verifyToken, rejectAllApprovalSubmission);
 approvalSubmissionRouter.post(
   "/:submissionId/items",
   verifyToken,
@@ -30,7 +30,7 @@ approvalSubmissionRouter.post(
 approvalSubmissionRouter.get("/items/:itemId", verifyToken, getApprovalSubmissionItem);
 approvalSubmissionRouter.patch(
   "/items/:itemId/status",
-  isReno,
+  verifyToken,
   updateApprovalSubmissionItemStatus
 );
 

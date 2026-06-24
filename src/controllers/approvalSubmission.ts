@@ -1,11 +1,14 @@
 import { type Request, type Response } from "express";
-import { type WhereOptions } from "sequelize";
+import { Op, type Transaction, type WhereOptions } from "sequelize";
 import ApprovalSubmission from "../models/approvalSubmission";
 import ApprovalSubmissionItem from "../models/approvalSubmissionItem";
+import User from "../models/user";
+import { REGISTERED_APPROVAL_CATEGORIES } from "../config/approvalReviewers";
 import {
   type ApprovalSubmissionDTO,
   type ApprovalSubmissionItemDTO,
   type ApprovalSubmissionItemStatus,
+  type ApprovalSubmissionRequesterDTO,
   type ApprovalSubmissionStatus,
   type ApprovalSubmissionWithItemsDTO,
   type ListApprovalSubmissionsDTO,
@@ -13,10 +16,17 @@ import {
 } from "../types/approvalSubmission/responses";
 import { type APIResponse } from "../types/utils/api";
 import {
+  assertCanReviewSubmission,
+  canUserReadSubmission,
+  canUserReviewCategory,
+  canUserReviewUnmappedCategories,
+  getReviewableCategoriesForUser,
+} from "../services/approvalReviewer.service";
+import {
   notifyApprovalSubmissionItemStatusChange,
   notifyApprovalSubmissionStatusChange,
 } from "../services/approvalSubmissionWebhook.service";
-import { verifyUser } from "../services/user.service";
+import { notifyPayoutModificationRequest } from "../services/payoutModificationEmail.service";
 import Logger from "../utils/logger";
 import db from "../utils/db";
 import { z } from "zod";
@@ -31,9 +41,58 @@ import {
   submissionIdParamSchema,
   updateApprovalSubmissionItemStatusSchema,
   updateApprovalSubmissionStatusSchema,
+  validateItemsForCategory,
 } from "../validation/approvalSubmission";
 
 const RENO_REVIEW_STATUSES = new Set(["APPROVED", "PARTIALLY_APPROVED", "REJECTED"]);
+
+const approvalSubmissionItemsInclude = {
+  model: ApprovalSubmissionItem,
+  as: "items",
+  required: false,
+};
+
+const approvalSubmissionRequesterInclude = {
+  model: User,
+  as: "requester",
+  required: false,
+};
+
+const approvalSubmissionWithItemsAndRequesterInclude = [
+  approvalSubmissionItemsInclude,
+  approvalSubmissionRequesterInclude,
+];
+
+type ApprovalSubmissionRow = {
+  requestedBy: number;
+  requester?: ApprovalSubmissionRequesterDTO;
+  items?: ApprovalSubmissionItemDTO[];
+} & Omit<ApprovalSubmissionDTO, "requestedBy">;
+
+function serializeRequester(
+  requester: ApprovalSubmissionRequesterDTO | undefined,
+  requestedById: number
+): ApprovalSubmissionRequesterDTO {
+  if (requester) {
+    return {
+      id: requester.id,
+      role: requester.role,
+      is_deleted: requester.is_deleted,
+      is_block: requester.is_block,
+    };
+  }
+
+  return { id: requestedById, role: null, is_deleted: 0, is_block: 0 };
+}
+
+function serializeSubmission(row: { toJSON: () => unknown }): ApprovalSubmissionDTO {
+  const json = row.toJSON() as ApprovalSubmissionRow;
+  const { requester, requestedBy: requestedById, items: _items, ...submission } = json;
+  return {
+    ...submission,
+    requestedBy: serializeRequester(requester, requestedById),
+  };
+}
 
 function serializeSnapshot(snapshot: unknown): string | null {
   if (snapshot === undefined) {
@@ -50,7 +109,7 @@ type CreateApprovalSubmissionItemInput = z.infer<typeof createApprovalSubmission
 
 function buildItemCreateAttributes(item: CreateApprovalSubmissionItemInput): {
   itemType: string;
-  itemId: number;
+  itemId: string;
   itemSnapshot: string | null;
   itemNote: string | null;
 } | null {
@@ -80,13 +139,7 @@ async function findSubmissionById(id: number) {
 
 async function findSubmissionWithItemsById(id: number) {
   return ApprovalSubmission.findByPk(id, {
-    include: [
-      {
-        model: ApprovalSubmissionItem,
-        as: "items",
-        required: false,
-      },
-    ],
+    include: approvalSubmissionWithItemsAndRequesterInclude,
   });
 }
 
@@ -97,14 +150,68 @@ function serializeSubmissionWithItems(
     return null;
   }
 
-  const json = row.toJSON() as ApprovalSubmissionDTO & {
-    items?: ApprovalSubmissionItemDTO[];
-  };
-  const { items = [], ...submission } = json;
+  const json = row.toJSON() as ApprovalSubmissionRow;
+  const { requester, requestedBy: requestedById, items = [], ...submission } = json;
   return {
     ...submission,
+    requestedBy: serializeRequester(requester, requestedById),
     items: items.map((item) => item as ApprovalSubmissionItemDTO),
   };
+}
+
+async function syncSubmissionStatusFromItems(
+  submission: NonNullable<Awaited<ReturnType<typeof findSubmissionById>>>,
+  submissionId: number,
+  reviewedBy: number,
+  transaction: Transaction
+): Promise<ApprovalSubmissionStatus | null> {
+  const items = await ApprovalSubmissionItem.findAll({
+    where: { submissionId },
+    transaction,
+  });
+
+  if (items.length === 0) {
+    return null;
+  }
+
+  const itemStatuses = items.map(
+    (row) => (row.toJSON() as ApprovalSubmissionItemDTO).status
+  );
+  const approvedCount = itemStatuses.filter((s) => s === "APPROVED").length;
+  const allApproved = approvedCount === items.length;
+  const someApproved = approvedCount > 0 && !allApproved;
+
+  let nextStatus: ApprovalSubmissionStatus | null = null;
+  if (allApproved) {
+    nextStatus = "APPROVED";
+  } else if (someApproved) {
+    nextStatus = "PARTIALLY_APPROVED";
+  }
+
+  if (nextStatus === null) {
+    return null;
+  }
+
+  const submissionData = submission.toJSON() as { status: ApprovalSubmissionStatus };
+  if (submissionData.status === nextStatus) {
+    return null;
+  }
+
+  const now = new Date();
+  await submission.update(
+    {
+      status: nextStatus,
+      reviewedBy,
+      reviewedAt: now,
+    },
+    { transaction }
+  );
+
+  if (allApproved) {
+    void notifyApprovalSubmissionStatusChange(submissionId, "APPROVED");
+  }
+
+  return nextStatus;
 }
 
 async function reviewAllItems(
@@ -141,11 +248,19 @@ async function reviewAllItems(
       return res.status(404).json({ error: { message: "Approval submission not found" }, data: null });
     }
 
-    const submissionData = submission.toJSON() as ApprovalSubmissionDTO;
+    const submissionData = submission.toJSON() as {
+      status: ApprovalSubmissionStatus;
+      category: string | null;
+    };
     if (submissionData.status !== "PENDING") {
       return res
         .status(400)
         .json({ error: { message: "Only pending submissions can be reviewed" }, data: null });
+    }
+
+    const reviewAuth = await assertCanReviewSubmission(req.user, submissionData.category);
+    if (!reviewAuth.allowed) {
+      return res.status(403).json({ error: { message: reviewAuth.message }, data: null });
     }
 
     const items = await db.transaction(async (transaction) => {
@@ -175,13 +290,17 @@ async function reviewAllItems(
     void notifyApprovalSubmissionStatusChange(id, submissionStatus);
     for (const item of items) {
       const itemData = item.toJSON() as ApprovalSubmissionItemDTO;
-      void notifyApprovalSubmissionItemStatusChange(itemData.id, itemStatus);
+      // void notifyApprovalSubmissionItemStatusChange(itemData.id, itemStatus);
     }
+
+    const submissionWithDetails = await findSubmissionWithItemsById(id);
 
     return res.status(200).json({
       error: null,
       data: {
-        submission: submission.toJSON() as ApprovalSubmissionDTO,
+        submission: submissionWithDetails
+          ? serializeSubmission(submissionWithDetails)
+          : serializeSubmission(submission),
         items: items.map((item) => item.toJSON() as ApprovalSubmissionItemDTO),
       },
     });
@@ -196,10 +315,70 @@ async function reviewAllItems(
 type ListApprovalSubmissionsFilters = {
   status?: ApprovalSubmissionStatus;
   category?: string;
+  contextType?: string;
+  contextId?: number;
   page?: number;
   per_page?: number;
   requestedBy?: number;
+  reviewScope?: {
+    reviewableCategories: string[];
+    includeUnmapped: boolean;
+  };
 };
+
+function buildListWhere(filters: ListApprovalSubmissionsFilters): WhereOptions {
+  const { status, category, contextType, contextId, requestedBy, reviewScope } = filters;
+
+  const where: Record<string, unknown> = {};
+
+  if (status !== undefined) {
+    where.status = status;
+  }
+  if (contextType !== undefined) {
+    where.contextType = contextType;
+  }
+  if (contextId !== undefined) {
+    where.contextId = contextId;
+  }
+  if (requestedBy !== undefined) {
+    where.requestedBy = requestedBy;
+  }
+
+  if (category !== undefined) {
+    where.category = category;
+    return where;
+  }
+
+  if (reviewScope === undefined) {
+    return where;
+  }
+
+  const { reviewableCategories, includeUnmapped } = reviewScope;
+
+  if (reviewableCategories.length === 0 && !includeUnmapped) {
+    return { ...where, id: -1 };
+  }
+
+  if (reviewableCategories.length === 1 && !includeUnmapped) {
+    where.category = reviewableCategories[0];
+    return where;
+  }
+
+  const categoryConditions: WhereOptions[] = [];
+  if (reviewableCategories.length > 0) {
+    categoryConditions.push({ category: { [Op.in]: reviewableCategories } });
+  }
+  if (includeUnmapped) {
+    categoryConditions.push({ category: null });
+    categoryConditions.push({ category: { [Op.notIn]: REGISTERED_APPROVAL_CATEGORIES } });
+  }
+
+  if (categoryConditions.length === 1) {
+    return { ...where, ...categoryConditions[0] };
+  }
+
+  return { ...where, [Op.or]: categoryConditions };
+}
 
 function buildListFilters(
   query: ListApprovalSubmissionsQuery,
@@ -208,6 +387,12 @@ function buildListFilters(
   const filters: ListApprovalSubmissionsFilters = {};
   if (query.status !== undefined) {
     filters.status = query.status;
+  }
+  if (query.contextType !== undefined) {
+    filters.contextType = query.contextType;
+  }
+  if (query.contextId !== undefined) {
+    filters.contextId = query.contextId;
   }
   if (query.category !== undefined) {
     filters.category = query.category;
@@ -229,44 +414,21 @@ function buildListFilters(
 async function queryApprovalSubmissionsList(
   filters: ListApprovalSubmissionsFilters
 ): Promise<ListApprovalSubmissionsDTO> {
-  const { status, category, page, per_page, requestedBy } = filters;
+  const { page, per_page } = filters;
   const isPaginated = page !== undefined && per_page !== undefined;
-  const where: WhereOptions = {};
-
-  if (status !== undefined) {
-    where.status = status;
-  }
-  if (category !== undefined) {
-    where.category = category;
-  }
-  if (requestedBy !== undefined) {
-    where.requestedBy = requestedBy;
-  }
+  const where = buildListWhere(filters);
 
   const { count, rows } = await ApprovalSubmission.findAndCountAll({
     where,
     ...(isPaginated ? { limit: per_page, offset: (page - 1) * per_page } : {}),
     order: [["id", "DESC"]],
-    include: [
-      {
-        model: ApprovalSubmissionItem,
-        as: "items",
-        required: false,
-      },
-    ],
+    include: approvalSubmissionWithItemsAndRequesterInclude,
     distinct: true,
   });
 
-  const submissions: ApprovalSubmissionWithItemsDTO[] = rows.map((row) => {
-    const json = row.toJSON() as ApprovalSubmissionDTO & {
-      items?: ApprovalSubmissionItemDTO[];
-    };
-    const { items = [], ...submission } = json;
-    return {
-      ...submission,
-      items: items.map((item) => item as ApprovalSubmissionItemDTO),
-    };
-  });
+  const submissions: ApprovalSubmissionWithItemsDTO[] = rows.map((row) =>
+    serializeSubmissionWithItems(row)!
+  );
 
   const total = count;
   const pagination = isPaginated
@@ -305,6 +467,10 @@ export const listApprovalSubmissions = async (
   req: Request,
   res: Response<APIResponse<ListApprovalSubmissionsDTO>>
 ) => {
+  if (!req.user?.id) {
+    return res.status(403).json({ error: { message: "Unauthorized" }, data: null });
+  }
+
   const parsed = listApprovalSubmissionsQuerySchema.safeParse(req.query);
   if (!parsed.success) {
     return res
@@ -312,7 +478,32 @@ export const listApprovalSubmissions = async (
       .json({ error: { message: "Invalid query params", details: parsed.error.flatten() }, data: null });
   }
 
-  return handleListApprovalSubmissions(res, buildListFilters(parsed.data));
+  const reviewableCategories = await getReviewableCategoriesForUser(req.user);
+  const includeUnmapped = await canUserReviewUnmappedCategories(req.user);
+
+  if (reviewableCategories.length === 0 && !includeUnmapped) {
+    return res.status(200).json({
+      error: null,
+      data: {
+        submissions: [],
+        pagination: { page: 1, per_page: 0, total: 0, total_pages: 0 },
+      },
+    });
+  }
+
+  if (parsed.data.category !== undefined) {
+    const canReview = await canUserReviewCategory(req.user, parsed.data.category);
+    if (!canReview) {
+      return res
+        .status(403)
+        .json({ error: { message: "You are not allowed to list this category" }, data: null });
+    }
+  }
+
+  return handleListApprovalSubmissions(res, {
+    ...buildListFilters(parsed.data),
+    reviewScope: { reviewableCategories, includeUnmapped },
+  });
 };
 
 export const listMyApprovalSubmissions = async (
@@ -354,19 +545,26 @@ export const getApprovalSubmission = async (
 
   try {
     const submission = await findSubmissionWithItemsById(id);
-    const data = serializeSubmissionWithItems(submission);
-    if (!data) {
+    if (!submission) {
       return res.status(404).json({ error: { message: "Approval submission not found" }, data: null });
     }
 
-    const isReno = await verifyUser(req.user, "reno");
-    if (!isReno && data.requestedBy !== Number(req.user.id)) {
+    const submissionData = submission.toJSON() as {
+      requestedBy: number;
+      category: string | null;
+    };
+    const canRead = await canUserReadSubmission(
+      req.user,
+      submissionData.requestedBy,
+      submissionData.category
+    );
+    if (!canRead) {
       return res
         .status(403)
         .json({ error: { message: "You are not allowed to access this submission" }, data: null });
     }
 
-    return res.status(200).json({ error: null, data });
+    return res.status(200).json({ error: null, data: serializeSubmissionWithItems(submission)! });
   } catch (e) {
     Logger.error(e);
     return res
@@ -394,6 +592,11 @@ export const createApprovalSubmission = async (
 
   const { contextType, contextId, category, requestNote, items } = parsed.data;
 
+  const categoryValidation = validateItemsForCategory(category, items);
+  if (!categoryValidation.ok) {
+    return res.status(400).json({ error: { message: categoryValidation.message }, data: null });
+  }
+
   if (!req.user?.id) {
     return res
       .status(403)
@@ -402,7 +605,7 @@ export const createApprovalSubmission = async (
 
   const itemAttributes: {
     itemType: string;
-    itemId: number;
+    itemId: string;
     itemSnapshot: string | null;
     itemNote: string | null;
   }[] = [];
@@ -420,7 +623,7 @@ export const createApprovalSubmission = async (
   }
 
   try {
-    const { submission, createdItems } = await db.transaction(async (transaction) => {
+    const { submissionId } = await db.transaction(async (transaction) => {
       const createdSubmission = await ApprovalSubmission.create(
         {
           contextType,
@@ -438,11 +641,10 @@ export const createApprovalSubmission = async (
         { transaction }
       );
 
-      const submissionId = (createdSubmission.toJSON() as ApprovalSubmissionDTO).id;
-      const createdSubmissionItems = [];
+      const submissionId = (createdSubmission.toJSON() as { id: number }).id;
 
       for (const attributes of itemAttributes) {
-        const createdItem = await ApprovalSubmissionItem.create(
+        await ApprovalSubmissionItem.create(
           {
             submissionId,
             ...attributes,
@@ -451,18 +653,21 @@ export const createApprovalSubmission = async (
           },
           { transaction }
         );
-        createdSubmissionItems.push(createdItem);
       }
 
-      return { submission: createdSubmission, createdItems: createdSubmissionItems };
+      return { submissionId };
     });
+
+    const submissionWithDetails = await findSubmissionWithItemsById(submissionId);
+
+    if (category === "PAYOUT_EDIT" && submissionWithDetails) {
+      const data = serializeSubmissionWithItems(submissionWithDetails)!;
+      void notifyPayoutModificationRequest(data).catch(Logger.error);
+    }
 
     return res.status(201).json({
       error: null,
-      data: {
-        ...(submission.toJSON() as ApprovalSubmissionDTO),
-        items: createdItems.map((item) => item.toJSON() as ApprovalSubmissionItemDTO),
-      },
+      data: serializeSubmissionWithItems(submissionWithDetails)!,
     });
   } catch (e) {
     Logger.error(e);
@@ -503,7 +708,11 @@ export const createApprovalSubmissionItem = async (
       return res.status(404).json({ error: { message: "Approval submission not found" }, data: null });
     }
 
-    const submissionData = submission.toJSON() as ApprovalSubmissionDTO;
+    const submissionData = submission.toJSON() as {
+      status: ApprovalSubmissionStatus;
+      requestedBy: number;
+      category: string | null;
+    };
     if (submissionData.status !== "PENDING") {
       return res
         .status(400)
@@ -514,6 +723,14 @@ export const createApprovalSubmissionItem = async (
       return res
         .status(403)
         .json({ error: { message: "Only the submission requester can add items" }, data: null });
+    }
+
+    const categoryValidation = validateItemsForCategory(
+      submissionData.category ?? undefined,
+      [{ itemType, itemId, itemSnapshot, itemNote }]
+    );
+    if (!categoryValidation.ok) {
+      return res.status(400).json({ error: { message: categoryValidation.message }, data: null });
     }
 
     const attributes = buildItemCreateAttributes({ itemType, itemId, itemSnapshot, itemNote });
@@ -570,9 +787,16 @@ export const getApprovalSubmissionItem = async (
       return res.status(404).json({ error: { message: "Approval submission not found" }, data: null });
     }
 
-    const submissionData = submission.toJSON() as ApprovalSubmissionDTO;
-    const isReno = await verifyUser(req.user, "reno");
-    if (!isReno && submissionData.requestedBy !== Number(req.user.id)) {
+    const submissionData = submission.toJSON() as {
+      requestedBy: number;
+      category: string | null;
+    };
+    const canRead = await canUserReadSubmission(
+      req.user,
+      submissionData.requestedBy,
+      submissionData.category
+    );
+    if (!canRead) {
       return res
         .status(403)
         .json({ error: { message: "You are not allowed to access this item" }, data: null });
@@ -632,18 +856,40 @@ export const updateApprovalSubmissionItemStatus = async (
       return res.status(404).json({ error: { message: "Approval submission not found" }, data: null });
     }
 
-    const submissionData = submission.toJSON() as ApprovalSubmissionDTO;
-    if (submissionData.status !== "PENDING") {
+    const submissionData = submission.toJSON() as { status: ApprovalSubmissionStatus; category: string | null };
+    if (submissionData.status !== "PENDING" && submissionData.status !== "PARTIALLY_APPROVED") {
       return res
         .status(400)
-        .json({ error: { message: "Only items on pending submissions can be reviewed" }, data: null });
+        .json({ error: { message: "Only items on pending or partially approved submissions can be reviewed" }, data: null });
+    }
+
+    const reviewAuth = await assertCanReviewSubmission(req.user, submissionData.category);
+    if (!reviewAuth.allowed) {
+      return res.status(403).json({ error: { message: reviewAuth.message }, data: null });
     }
 
     const now = new Date();
-    await item.update({ status, decidedAt: now });
-    await item.reload();
+    let submissionStatusChange: ApprovalSubmissionStatus | null = null;
 
-    void notifyApprovalSubmissionItemStatusChange(itemId, status);
+    await db.transaction(async (transaction) => {
+      await item.update({ status, decidedAt: now }, { transaction });
+      submissionStatusChange = await syncSubmissionStatusFromItems(
+        submission,
+        itemData.submissionId,
+        Number(req.user!.id),
+        transaction
+      );
+    });
+
+    await item.reload();
+    if (submissionStatusChange !== null) {
+      await submission.reload();
+    }
+
+    // void notifyApprovalSubmissionItemStatusChange(itemId, status);
+    if (submissionStatusChange !== null) {
+      void notifyApprovalSubmissionStatusChange(itemData.submissionId, submissionStatusChange);
+    }
 
     return res
       .status(200)
@@ -687,7 +933,11 @@ export const updateApprovalSubmissionStatus = async (
       return res.status(404).json({ error: { message: "Approval submission not found" }, data: null });
     }
 
-    const submissionData = submission.toJSON() as ApprovalSubmissionDTO;
+    const submissionData = submission.toJSON() as {
+      status: ApprovalSubmissionStatus;
+      requestedBy: number;
+      category: string | null;
+    };
 
     if (submissionData.status !== "PENDING") {
       return res
@@ -704,11 +954,9 @@ export const updateApprovalSubmissionStatus = async (
 
       await submission.update({ status: "CANCELLED" });
     } else if (RENO_REVIEW_STATUSES.has(status)) {
-      const isReno = await verifyUser(req.user, "reno");
-      if (!isReno) {
-        return res
-          .status(403)
-          .json({ error: { message: "Only Reno users can approve or reject submissions" }, data: null });
+      const reviewAuth = await assertCanReviewSubmission(req.user, submissionData.category);
+      if (!reviewAuth.allowed) {
+        return res.status(403).json({ error: { message: reviewAuth.message }, data: null });
       }
 
       const reviewNote = "reviewNote" in bodyParsed.data ? bodyParsed.data.reviewNote ?? null : null;
@@ -721,13 +969,18 @@ export const updateApprovalSubmissionStatus = async (
       });
     }
 
-    await submission.reload();
+    const submissionWithRequester = await ApprovalSubmission.findByPk(id, {
+      include: [approvalSubmissionRequesterInclude],
+    });
 
     void notifyApprovalSubmissionStatusChange(id, status);
 
-    return res
-      .status(200)
-      .json({ error: null, data: submission.toJSON() as ApprovalSubmissionDTO });
+    return res.status(200).json({
+      error: null,
+      data: submissionWithRequester
+        ? serializeSubmission(submissionWithRequester)
+        : serializeSubmission(submission),
+    });
   } catch (e) {
     Logger.error(e);
     return res

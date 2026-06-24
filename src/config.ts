@@ -28,4 +28,24 @@ export const jwtSecret =
 export const leanWebhookSecret = process.env.LEAN_WEBHOOK_SECRET || "";
 
 export const apiV1 = process.env.API_V1 || "";
+console.log(process.env);
+
+export const mail = {
+  host: process.env.SMTP_MAIL_HOST || "",
+  port: parseNumber(process.env.SMTP_MAIL_PORT, 587),
+  secure: process.env.SMTP_MAIL_SECURE === "true",
+  user: process.env.SMTP_MAIL_USERNAME || "",
+  password: process.env.SMTP_MAIL_PASSWORD || "",
+  requireTls: process.env.SMTP_REQUIRE_TLS === "true",
+  senderEmail: process.env.SENDER_EMAIL || "",
+};
+
+export const portalLink = (process.env.PORTAL_LINK || "").replace(/\/$/, "");
+
+export function buildContractorPaymentsUrl(projectId: number): string | null {
+  if (!portalLink) {
+    return null;
+  }
+  return `${portalLink}/admin/projects/${projectId}/contractor-payments`;
+}
 

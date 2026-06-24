@@ -5,13 +5,20 @@ export type ApprovalSubmissionStatus =
   | "PARTIALLY_APPROVED"
   | "CANCELLED";
 
+export type ApprovalSubmissionRequesterDTO = {
+  id: number;
+  role: string | null;
+  is_deleted: number;
+  is_block: number;
+};
+
 export type ApprovalSubmissionDTO = {
   id: number;
   category: string | null;
   contextType: string;
   contextId: number;
   status: ApprovalSubmissionStatus;
-  requestedBy: number;
+  requestedBy: ApprovalSubmissionRequesterDTO;
   requestedAt: string;
   requestNote: string | null;
   requestPayload: string | null;
@@ -26,7 +33,7 @@ export type ApprovalSubmissionItemDTO = {
   id: number;
   submissionId: number;
   itemType: string;
-  itemId: number;
+  itemId: string;
   itemSnapshot: string | null;
   status: ApprovalSubmissionItemStatus;
   decidedAt: string | null;

@@ -20,7 +20,7 @@ const ApprovalSubmissionItem = db.define(
       field: "item_type",
     },
     itemId: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.STRING(255),
       allowNull: false,
       field: "item_id",
     },
