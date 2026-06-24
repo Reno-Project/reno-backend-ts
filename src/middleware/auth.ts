@@ -1,16 +1,14 @@
 import crypto from "crypto";
 import { type NextFunction, type Request, type Response } from "express";
-import { QueryTypes } from "sequelize";
-import { db as dbConfig } from "../config";
 import { messages } from "../config/messages";
 import { leanWebhookSecret } from "../config";
 import { verify } from "../services/jwt.service";
+import { isRenoAdminUser } from "../services/renoAdmin.service";
 import { verifyUser } from "../services/user.service";
 import type { JwtPayload } from "../types/auth";
 import type { APIResponse } from "../types/utils/api";
 import { getAllContractorRoles } from "../utils/roles";
 import Logger from "../utils/logger";
-import db from "../utils/db";
 
 type AuthResponse = Response<APIResponse<null>>;
 
@@ -122,20 +120,8 @@ export const isRenoAdmin = async (req: Request, res: AuthResponse, next: NextFun
       return;
     }
 
-    const schema = dbConfig.schema || "dbo";
-    const rows = (await db.query(
-      `SELECT TOP 1 r.name
-       FROM [${schema}].[user_roles] ur
-       INNER JOIN [${schema}].[roles] r ON r.id = ur.role_id
-       WHERE ur.user_id = :user_id
-         AND UPPER(r.name) IN ('RENO_ADMIN', 'RENO_SUPER_ADMIN')`,
-      {
-        replacements: { user_id: payload.id },
-        type: QueryTypes.SELECT,
-      }
-    )) as Array<{ name: string }>;
-
-    if (!rows || rows.length === 0) {
+    const isAdmin = await isRenoAdminUser(Number(payload.id));
+    if (!isAdmin) {
       return sendAuthError(res, 403, messages.ACTION_NOT_ALLOWED);
     }
 
