@@ -49,8 +49,11 @@ export type ApprovalSubmissionWithItemsDTO = ApprovalSubmissionDTO & {
   items: ApprovalSubmissionItemDTO[];
 };
 
+export type ApprovalSubmissionListPermission = "create" | "review";
+
 export type ListApprovalSubmissionsDTO = {
   submissions: ApprovalSubmissionWithItemsDTO[];
+  perms: ApprovalSubmissionListPermission[];
   pagination: {
     page: number;
     per_page: number;
