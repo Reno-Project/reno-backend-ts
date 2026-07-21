@@ -1,5 +1,6 @@
 import { DataTypes } from "sequelize";
 import ApprovalSubmissionItem from "./approvalSubmissionItem";
+import Project from "./project";
 import User from "./user";
 import db from "../utils/db";
 
@@ -80,6 +81,12 @@ ApprovalSubmission.hasMany(ApprovalSubmissionItem, {
 ApprovalSubmission.belongsTo(User, {
   foreignKey: "requestedBy",
   as: "requester",
+});
+
+ApprovalSubmission.belongsTo(Project, {
+  foreignKey: "contextId",
+  as: "project",
+  constraints: false,
 });
 
 export default ApprovalSubmission;

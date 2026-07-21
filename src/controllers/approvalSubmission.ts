@@ -2,6 +2,7 @@ import { type Request, type Response } from "express";
 import { Op, type Transaction, type WhereOptions } from "sequelize";
 import ApprovalSubmission from "../models/approvalSubmission";
 import ApprovalSubmissionItem from "../models/approvalSubmissionItem";
+import Project from "../models/project";
 import User from "../models/user";
 import { REGISTERED_APPROVAL_CATEGORIES } from "../config/approvalReviewers";
 import {
@@ -62,15 +63,24 @@ const approvalSubmissionRequesterInclude = {
   required: false,
 };
 
+const approvalSubmissionProjectInclude = {
+  model: Project,
+  as: "project",
+  required: false,
+  attributes: ["id", "name"],
+};
+
 const approvalSubmissionWithItemsAndRequesterInclude = [
   approvalSubmissionItemsInclude,
   approvalSubmissionRequesterInclude,
+  approvalSubmissionProjectInclude,
 ];
 
 type ApprovalSubmissionRow = {
   requestedBy: number;
   requester?: ApprovalSubmissionRequesterDTO;
   items?: ApprovalSubmissionItemDTO[];
+  project?: { id: number; name: string | null } | null;
 } & Omit<ApprovalSubmissionDTO, "requestedBy">;
 
 function serializeRequester(
@@ -91,7 +101,13 @@ function serializeRequester(
 
 function serializeSubmission(row: { toJSON: () => unknown }): ApprovalSubmissionDTO {
   const json = row.toJSON() as ApprovalSubmissionRow;
-  const { requester, requestedBy: requestedById, items: _items, ...submission } = json;
+  const {
+    requester,
+    requestedBy: requestedById,
+    items: _items,
+    project: _project,
+    ...submission
+  } = json;
   return {
     ...submission,
     requestedBy: serializeRequester(requester, requestedById),
@@ -155,11 +171,47 @@ function serializeSubmissionWithItems(
   }
 
   const json = row.toJSON() as ApprovalSubmissionRow;
-  const { requester, requestedBy: requestedById, items = [], ...submission } = json;
+  const {
+    requester,
+    requestedBy: requestedById,
+    items = [],
+    project,
+    ...submission
+  } = json;
+  const projectName =
+    typeof project?.name === "string" && project.name.trim().length > 0
+      ? project.name.trim()
+      : null;
+
   return {
     ...submission,
     requestedBy: serializeRequester(requester, requestedById),
-    items: items.map((item) => item as ApprovalSubmissionItemDTO),
+    items: items.map((item) => {
+      const dto = item as ApprovalSubmissionItemDTO;
+      if (!projectName) {
+        return dto;
+      }
+
+      let snapshot: Record<string, unknown>;
+      if (dto.itemSnapshot == null || dto.itemSnapshot === "") {
+        snapshot = {};
+      } else {
+        try {
+          const parsed = JSON.parse(dto.itemSnapshot) as unknown;
+          if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+            return dto;
+          }
+          snapshot = parsed as Record<string, unknown>;
+        } catch {
+          return dto;
+        }
+      }
+
+      return {
+        ...dto,
+        itemSnapshot: JSON.stringify({ ...snapshot, project_name: projectName }),
+      };
+    }),
   };
 }
 
