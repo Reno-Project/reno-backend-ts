@@ -83,6 +83,11 @@ ApprovalSubmission.belongsTo(User, {
   as: "requester",
 });
 
+ApprovalSubmission.belongsTo(User, {
+  foreignKey: "reviewedBy",
+  as: "reviewer",
+});
+
 ApprovalSubmission.belongsTo(Project, {
   foreignKey: "contextId",
   as: "project",
