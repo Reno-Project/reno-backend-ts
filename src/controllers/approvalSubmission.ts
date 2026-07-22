@@ -10,6 +10,7 @@ import {
   type ApprovalSubmissionItemDTO,
   type ApprovalSubmissionItemStatus,
   type ApprovalSubmissionRequesterDTO,
+  type ApprovalSubmissionReviewerDTO,
   type ApprovalSubmissionStatus,
   type ApprovalSubmissionWithItemsDTO,
   type ListApprovalSubmissionsDTO,
@@ -63,6 +64,13 @@ const approvalSubmissionRequesterInclude = {
   required: false,
 };
 
+const approvalSubmissionReviewerInclude = {
+  model: User,
+  as: "reviewer",
+  required: false,
+  attributes: ["id", "username", "email"],
+};
+
 const approvalSubmissionProjectInclude = {
   model: Project,
   as: "project",
@@ -73,15 +81,24 @@ const approvalSubmissionProjectInclude = {
 const approvalSubmissionWithItemsAndRequesterInclude = [
   approvalSubmissionItemsInclude,
   approvalSubmissionRequesterInclude,
+  approvalSubmissionReviewerInclude,
   approvalSubmissionProjectInclude,
 ];
 
+type ApprovalSubmissionReviewerRow = {
+  id: number;
+  username?: string | null;
+  email?: string | null;
+};
+
 type ApprovalSubmissionRow = {
   requestedBy: number;
+  reviewedBy: number | null;
   requester?: ApprovalSubmissionRequesterDTO;
+  reviewer?: ApprovalSubmissionReviewerRow | null;
   items?: ApprovalSubmissionItemDTO[];
   project?: { id: number; name: string | null } | null;
-} & Omit<ApprovalSubmissionDTO, "requestedBy">;
+} & Omit<ApprovalSubmissionDTO, "requestedBy" | "reviewedBy">;
 
 function serializeRequester(
   requester: ApprovalSubmissionRequesterDTO | undefined,
@@ -99,11 +116,32 @@ function serializeRequester(
   return { id: requestedById, role: null, is_deleted: 0, is_block: 0 };
 }
 
+function serializeReviewer(
+  reviewer: ApprovalSubmissionReviewerRow | null | undefined,
+  reviewedById: number | null
+): ApprovalSubmissionReviewerDTO | null {
+  if (reviewedById == null) {
+    return null;
+  }
+
+  if (reviewer) {
+    return {
+      user_id: reviewer.id,
+      username: reviewer.username ?? null,
+      email: reviewer.email ?? null,
+    };
+  }
+
+  return { user_id: reviewedById, username: null, email: null };
+}
+
 function serializeSubmission(row: { toJSON: () => unknown }): ApprovalSubmissionDTO {
   const json = row.toJSON() as ApprovalSubmissionRow;
   const {
     requester,
     requestedBy: requestedById,
+    reviewer,
+    reviewedBy: reviewedById,
     items: _items,
     project: _project,
     ...submission
@@ -111,6 +149,7 @@ function serializeSubmission(row: { toJSON: () => unknown }): ApprovalSubmission
   return {
     ...submission,
     requestedBy: serializeRequester(requester, requestedById),
+    reviewedBy: serializeReviewer(reviewer, reviewedById),
   };
 }
 
@@ -174,6 +213,8 @@ function serializeSubmissionWithItems(
   const {
     requester,
     requestedBy: requestedById,
+    reviewer,
+    reviewedBy: reviewedById,
     items = [],
     project,
     ...submission
@@ -186,6 +227,7 @@ function serializeSubmissionWithItems(
   return {
     ...submission,
     requestedBy: serializeRequester(requester, requestedById),
+    reviewedBy: serializeReviewer(reviewer, reviewedById),
     items: items.map((item) => {
       const dto = item as ApprovalSubmissionItemDTO;
       if (!projectName) {
@@ -1094,7 +1136,7 @@ export const updateApprovalSubmissionStatus = async (
     }
 
     const submissionWithRequester = await ApprovalSubmission.findByPk(id, {
-      include: [approvalSubmissionRequesterInclude],
+      include: [approvalSubmissionRequesterInclude, approvalSubmissionReviewerInclude],
     });
 
     void notifyApprovalSubmissionStatusChange(id, status);
