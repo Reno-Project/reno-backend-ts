@@ -49,7 +49,7 @@ jobs:
           - name: reno
             app-name: 'reno-backend-ts-prod'
           - name: egp
-            app-name: 'reno-backend-ts-prod-egp'
+            app-name: 'reno-ts-backend-egp'
 
     name: Deploy PROD (${{ matrix.name }})
 
