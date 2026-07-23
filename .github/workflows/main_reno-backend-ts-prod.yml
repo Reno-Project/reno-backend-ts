@@ -90,6 +90,5 @@ jobs:
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ matrix.app-name }}
-          slot-name: 'Production'
           package: .
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_EGP_PROD }}
