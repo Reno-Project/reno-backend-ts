@@ -1,4 +1,12 @@
 # Build once, deploy to both RENO and EGP production backends from main
+#
+# NAPOMENA o dva razlicita metoda autentikacije:
+#   RENO -> OIDC (azure/login sa service principal-om) - postojeci setup, ne diramo
+#   EGP  -> publish profile - jer GitHub service principal nema RBAC dozvolu
+#           na reno-ts-backend-egp, a za dodelu role treba Owner.
+#   Kada neko sa Owner rolom doda service principal-u "Contributor" na EGP app,
+#   moze se preci na OIDC i za EGP (obrisati publish-profile liniju + if uslove).
+
 name: Build and deploy Node.js app to Azure - PROD RENO + EGP
 
 on:
@@ -37,19 +45,19 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     permissions:
-      id-token: write   # required for OIDC
+      id-token: write   # potrebno za OIDC (RENO)
       contents: read
 
-    # Isti artifact ide na oba app-a, paralelno.
-    # fail-fast: false => ako jedan deploy pukne, drugi ide do kraja.
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: reno
             app-name: 'reno-backend-ts-prod'
+            auth: 'oidc'
           - name: egp
             app-name: 'reno-ts-backend-egp'
+            auth: 'publish-profile'
 
     name: Deploy PROD (${{ matrix.name }})
 
@@ -59,17 +67,29 @@ jobs:
         with:
           name: node-app
 
-      - name: Login to Azure
+      # --- RENO: OIDC login ---
+      - name: Login to Azure (OIDC)
+        if: matrix.auth == 'oidc'
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_0BE03D93B6D54B53BD4C73CC64124B4C }}
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_CDBE7C24033F440AA27443C1453BB98F }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_E98C18D8799542C885E509CBF57C7533 }}
 
-      - name: 'Deploy to Azure Web App - ${{ matrix.name }}'
-        id: deploy-to-webapp
+      - name: 'Deploy via OIDC - ${{ matrix.name }}'
+        if: matrix.auth == 'oidc'
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ matrix.app-name }}
           slot-name: 'Production'
           package: .
+
+      # --- EGP: publish profile ---
+      - name: 'Deploy via publish profile - ${{ matrix.name }}'
+        if: matrix.auth == 'publish-profile'
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ matrix.app-name }}
+          slot-name: 'Production'
+          package: .
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_EGP_PROD }}
