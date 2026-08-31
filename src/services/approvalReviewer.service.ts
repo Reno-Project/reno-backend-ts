@@ -11,7 +11,7 @@ import {
 import type { JwtPayload } from "../types/auth";
 import User from "../models/user";
 import { verifyUser } from "./user.service";
-import { isRenoAdminUser } from "./renoAdmin.service";
+import { isRenoAdminUser, isRenoSuperAdminUser } from "./renoAdmin.service";
 import db from "../utils/db";
 
 let payoutManagerEmailCache: { value: string | null; expiresAt: number } | null = null;
@@ -311,7 +311,8 @@ export async function getListPermsForUser(
     (submission) => submission.requestedBy.id === userId
   );
 
-  if (allOwnSubmissions) {
+  // Superadmins keep "review" on their own submissions (self-approve allowed).
+  if (allOwnSubmissions && !(await isRenoSuperAdminUser(userId))) {
     return perms.filter((permission) => permission !== "review");
   }
 
@@ -352,6 +353,11 @@ export async function canUserReviewSubmission(
     return true;
   }
 
+  // Superadmins may self-approve (e.g. START_PROJECT_ADMIN).
+  if (await isRenoSuperAdminUser(Number(user.id))) {
+    return true;
+  }
+
   const canCreate = await canUserCreateCategory(user, category);
   return !canCreate;
 }
@@ -376,15 +382,18 @@ export async function assertCanReviewSubmission(
   const allowed = await canUserReviewSubmission(user, category, requestedBy);
   if (!allowed) {
     if (requestedBy === Number(user.id)) {
-      const [canCreate, canReview] = await Promise.all([
-        canUserCreateCategory(user, category),
-        canUserReviewCategory(user, category),
-      ]);
-      if (canCreate && canReview) {
-        return {
-          allowed: false,
-          message: "You cannot review your own submission",
-        };
+      const isSuperAdmin = await isRenoSuperAdminUser(Number(user.id));
+      if (!isSuperAdmin) {
+        const [canCreate, canReview] = await Promise.all([
+          canUserCreateCategory(user, category),
+          canUserReviewCategory(user, category),
+        ]);
+        if (canCreate && canReview) {
+          return {
+            allowed: false,
+            message: "You cannot review your own submission",
+          };
+        }
       }
     }
 
