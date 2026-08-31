@@ -2,10 +2,6 @@ import { QueryTypes } from "sequelize";
 import { db as dbConfig } from "../config";
 import db from "../utils/db";
 
-import { QueryTypes } from "sequelize";
-import { db as dbConfig } from "../config";
-import db from "../utils/db";
-
 export async function isRenoAdminUser(userId: number): Promise<boolean> {
   const schema = dbConfig.schema || "dbo";
   const rows = (await db.query(
