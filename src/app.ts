@@ -13,8 +13,7 @@ const app = express();
 app.use(cors({
   origin: "*",
   methods: ['GET', 'POST', 'PUT', 'DELETE','OPTIONS', 'PATCH'],
-  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'language', 'lean-signature', 'X-Reno-App-Version'],
-  credentials: true
+  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'language', 'lean-signature', 'X-Reno-App-Version']
 }));
 
 app.use("/webhooks/lean", express.raw({ type: "*/*" }), leanWebhookRouter);
