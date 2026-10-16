@@ -1,15 +1,26 @@
-export type ApprovalVerifierType = "renoAdmin" | "payoutManager";
+import { PAYOUT_EDIT_APPROVAL_CONFIG } from "./payoutEditApproval";
+import { BILLING_MILESTONE_STATUS_EDIT_APPROVAL_CONFIG } from "./billingMilestoneStatusEditApproval";
 
-export type ApprovalReviewerConfig = {
-  verifier: ApprovalVerifierType;
+export type ApprovalVerifierType = "renoAdmin" | "payoutManager" | "payoutApprovalMail";
+
+export type PermissionEntry = { id: number } | { email: string };
+
+export type ApprovalCategoryConfig = {
+  verifier?: ApprovalVerifierType;
+  creators?: PermissionEntry[];
+  reviewers?: PermissionEntry[];
 };
 
-export const APPROVAL_REVIEWER_BY_CATEGORY = {
+export const APPROVAL_REVIEWER_BY_CATEGORY: Record<string, ApprovalCategoryConfig> = {
   START_PROJECT_ADMIN: { verifier: "renoAdmin" },
-  PAYOUT_EDIT: { verifier: "payoutManager" },
-} as const satisfies Record<string, ApprovalReviewerConfig>;
+  PAYOUT_EDIT: PAYOUT_EDIT_APPROVAL_CONFIG,
+  BILLING_MILESTONE_STATUS_EDIT: BILLING_MILESTONE_STATUS_EDIT_APPROVAL_CONFIG,
+};
 
-export type ApprovalCategory = keyof typeof APPROVAL_REVIEWER_BY_CATEGORY;
+export type ApprovalCategory =
+  | "START_PROJECT_ADMIN"
+  | "PAYOUT_EDIT"
+  | "BILLING_MILESTONE_STATUS_EDIT";
 
 export const REGISTERED_APPROVAL_CATEGORIES = Object.keys(
   APPROVAL_REVIEWER_BY_CATEGORY
@@ -27,9 +38,9 @@ export function isRegisteredApprovalCategory(
 
 export function getReviewerConfig(
   category: string | null | undefined
-): ApprovalReviewerConfig | null {
+): ApprovalCategoryConfig | null {
   if (!isRegisteredApprovalCategory(category)) {
     return null;
   }
-  return APPROVAL_REVIEWER_BY_CATEGORY[category];
+  return APPROVAL_REVIEWER_BY_CATEGORY[category] ?? null;
 }

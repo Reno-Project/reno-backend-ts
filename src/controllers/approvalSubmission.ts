@@ -2,6 +2,7 @@ import { type Request, type Response } from "express";
 import { Op, type Transaction, type WhereOptions } from "sequelize";
 import ApprovalSubmission from "../models/approvalSubmission";
 import ApprovalSubmissionItem from "../models/approvalSubmissionItem";
+import Project from "../models/project";
 import User from "../models/user";
 import { REGISTERED_APPROVAL_CATEGORIES } from "../config/approvalReviewers";
 import {
@@ -9,18 +10,23 @@ import {
   type ApprovalSubmissionItemDTO,
   type ApprovalSubmissionItemStatus,
   type ApprovalSubmissionRequesterDTO,
+  type ApprovalSubmissionReviewerDTO,
   type ApprovalSubmissionStatus,
   type ApprovalSubmissionWithItemsDTO,
   type ListApprovalSubmissionsDTO,
   type ReviewAllApprovalSubmissionDTO,
 } from "../types/approvalSubmission/responses";
 import { type APIResponse } from "../types/utils/api";
+import type { JwtPayload } from "../types/auth";
 import {
+  assertCanCreateSubmission,
   assertCanReviewSubmission,
+  canUserAccessCategoryForList,
+  canUserAccessUnmappedCategoriesForList,
   canUserReadSubmission,
-  canUserReviewCategory,
-  canUserReviewUnmappedCategories,
-  getReviewableCategoriesForUser,
+  filterSubmissionsByListAccess,
+  getAccessibleCategoriesForUser,
+  getListPermsForUser,
 } from "../services/approvalReviewer.service";
 import {
   notifyApprovalSubmissionItemStatusChange,
@@ -58,16 +64,41 @@ const approvalSubmissionRequesterInclude = {
   required: false,
 };
 
+const approvalSubmissionReviewerInclude = {
+  model: User,
+  as: "reviewer",
+  required: false,
+  attributes: ["id", "username", "email"],
+};
+
+const approvalSubmissionProjectInclude = {
+  model: Project,
+  as: "project",
+  required: false,
+  attributes: ["id", "name"],
+};
+
 const approvalSubmissionWithItemsAndRequesterInclude = [
   approvalSubmissionItemsInclude,
   approvalSubmissionRequesterInclude,
+  approvalSubmissionReviewerInclude,
+  approvalSubmissionProjectInclude,
 ];
+
+type ApprovalSubmissionReviewerRow = {
+  id: number;
+  username?: string | null;
+  email?: string | null;
+};
 
 type ApprovalSubmissionRow = {
   requestedBy: number;
+  reviewedBy: number | null;
   requester?: ApprovalSubmissionRequesterDTO;
+  reviewer?: ApprovalSubmissionReviewerRow | null;
   items?: ApprovalSubmissionItemDTO[];
-} & Omit<ApprovalSubmissionDTO, "requestedBy">;
+  project?: { id: number; name: string | null } | null;
+} & Omit<ApprovalSubmissionDTO, "requestedBy" | "reviewedBy">;
 
 function serializeRequester(
   requester: ApprovalSubmissionRequesterDTO | undefined,
@@ -85,12 +116,40 @@ function serializeRequester(
   return { id: requestedById, role: null, is_deleted: 0, is_block: 0 };
 }
 
+function serializeReviewer(
+  reviewer: ApprovalSubmissionReviewerRow | null | undefined,
+  reviewedById: number | null
+): ApprovalSubmissionReviewerDTO | null {
+  if (reviewedById == null) {
+    return null;
+  }
+
+  if (reviewer) {
+    return {
+      user_id: reviewer.id,
+      username: reviewer.username ?? null,
+      email: reviewer.email ?? null,
+    };
+  }
+
+  return { user_id: reviewedById, username: null, email: null };
+}
+
 function serializeSubmission(row: { toJSON: () => unknown }): ApprovalSubmissionDTO {
   const json = row.toJSON() as ApprovalSubmissionRow;
-  const { requester, requestedBy: requestedById, items: _items, ...submission } = json;
+  const {
+    requester,
+    requestedBy: requestedById,
+    reviewer,
+    reviewedBy: reviewedById,
+    items: _items,
+    project: _project,
+    ...submission
+  } = json;
   return {
     ...submission,
     requestedBy: serializeRequester(requester, requestedById),
+    reviewedBy: serializeReviewer(reviewer, reviewedById),
   };
 }
 
@@ -151,11 +210,50 @@ function serializeSubmissionWithItems(
   }
 
   const json = row.toJSON() as ApprovalSubmissionRow;
-  const { requester, requestedBy: requestedById, items = [], ...submission } = json;
+  const {
+    requester,
+    requestedBy: requestedById,
+    reviewer,
+    reviewedBy: reviewedById,
+    items = [],
+    project,
+    ...submission
+  } = json;
+  const projectName =
+    typeof project?.name === "string" && project.name.trim().length > 0
+      ? project.name.trim()
+      : null;
+
   return {
     ...submission,
     requestedBy: serializeRequester(requester, requestedById),
-    items: items.map((item) => item as ApprovalSubmissionItemDTO),
+    reviewedBy: serializeReviewer(reviewer, reviewedById),
+    items: items.map((item) => {
+      const dto = item as ApprovalSubmissionItemDTO;
+      if (!projectName) {
+        return dto;
+      }
+
+      let snapshot: Record<string, unknown>;
+      if (dto.itemSnapshot == null || dto.itemSnapshot === "") {
+        snapshot = {};
+      } else {
+        try {
+          const parsed = JSON.parse(dto.itemSnapshot) as unknown;
+          if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+            return dto;
+          }
+          snapshot = parsed as Record<string, unknown>;
+        } catch {
+          return dto;
+        }
+      }
+
+      return {
+        ...dto,
+        itemSnapshot: JSON.stringify({ ...snapshot, project_name: projectName }),
+      };
+    }),
   };
 }
 
@@ -251,6 +349,7 @@ async function reviewAllItems(
     const submissionData = submission.toJSON() as {
       status: ApprovalSubmissionStatus;
       category: string | null;
+      requestedBy: number;
     };
     if (submissionData.status !== "PENDING") {
       return res
@@ -258,7 +357,11 @@ async function reviewAllItems(
         .json({ error: { message: "Only pending submissions can be reviewed" }, data: null });
     }
 
-    const reviewAuth = await assertCanReviewSubmission(req.user, submissionData.category);
+    const reviewAuth = await assertCanReviewSubmission(
+      req.user,
+      submissionData.category,
+      submissionData.requestedBy
+    );
     if (!reviewAuth.allowed) {
       return res.status(403).json({ error: { message: reviewAuth.message }, data: null });
     }
@@ -320,14 +423,16 @@ type ListApprovalSubmissionsFilters = {
   page?: number;
   per_page?: number;
   requestedBy?: number;
-  reviewScope?: {
-    reviewableCategories: string[];
+  accessScope?: {
+    accessibleCategories: string[];
     includeUnmapped: boolean;
   };
+  listAccessUser?: JwtPayload;
+  categoryFilter?: string;
 };
 
 function buildListWhere(filters: ListApprovalSubmissionsFilters): WhereOptions {
-  const { status, category, contextType, contextId, requestedBy, reviewScope } = filters;
+  const { status, category, contextType, contextId, requestedBy, accessScope } = filters;
 
   const where: Record<string, unknown> = {};
 
@@ -349,24 +454,24 @@ function buildListWhere(filters: ListApprovalSubmissionsFilters): WhereOptions {
     return where;
   }
 
-  if (reviewScope === undefined) {
+  if (accessScope === undefined) {
     return where;
   }
 
-  const { reviewableCategories, includeUnmapped } = reviewScope;
+  const { accessibleCategories, includeUnmapped } = accessScope;
 
-  if (reviewableCategories.length === 0 && !includeUnmapped) {
+  if (accessibleCategories.length === 0 && !includeUnmapped) {
     return { ...where, id: -1 };
   }
 
-  if (reviewableCategories.length === 1 && !includeUnmapped) {
-    where.category = reviewableCategories[0];
+  if (accessibleCategories.length === 1 && !includeUnmapped) {
+    where.category = accessibleCategories[0];
     return where;
   }
 
   const categoryConditions: WhereOptions[] = [];
-  if (reviewableCategories.length > 0) {
-    categoryConditions.push({ category: { [Op.in]: reviewableCategories } });
+  if (accessibleCategories.length > 0) {
+    categoryConditions.push({ category: { [Op.in]: accessibleCategories } });
   }
   if (includeUnmapped) {
     categoryConditions.push({ category: null });
@@ -411,10 +516,24 @@ function buildListFilters(
   return filters;
 }
 
+function buildEmptyListResult(
+  page?: number,
+  per_page?: number
+): ListApprovalSubmissionsDTO {
+  const isPaginated = page !== undefined && per_page !== undefined;
+  return {
+    submissions: [],
+    perms: [],
+    pagination: isPaginated
+      ? { page, per_page, total: 0, total_pages: 0 }
+      : { page: 1, per_page: 0, total: 0, total_pages: 0 },
+  };
+}
+
 async function queryApprovalSubmissionsList(
   filters: ListApprovalSubmissionsFilters
 ): Promise<ListApprovalSubmissionsDTO> {
-  const { page, per_page } = filters;
+  const { page, per_page, listAccessUser, categoryFilter } = filters;
   const isPaginated = page !== undefined && per_page !== undefined;
   const where = buildListWhere(filters);
 
@@ -426,9 +545,15 @@ async function queryApprovalSubmissionsList(
     distinct: true,
   });
 
-  const submissions: ApprovalSubmissionWithItemsDTO[] = rows.map((row) =>
-    serializeSubmissionWithItems(row)!
-  );
+  const serialized = rows.map((row) => serializeSubmissionWithItems(row)!);
+
+  let submissions = serialized;
+  let perms: ListApprovalSubmissionsDTO["perms"] = [];
+
+  if (listAccessUser !== undefined) {
+    submissions = await filterSubmissionsByListAccess(listAccessUser, serialized);
+    perms = await getListPermsForUser(listAccessUser, submissions, categoryFilter);
+  }
 
   const total = count;
   const pagination = isPaginated
@@ -445,7 +570,7 @@ async function queryApprovalSubmissionsList(
         total_pages: total === 0 ? 0 : 1,
       };
 
-  return { submissions, pagination };
+  return { submissions, perms, pagination };
 }
 
 async function handleListApprovalSubmissions(
@@ -478,31 +603,36 @@ export const listApprovalSubmissions = async (
       .json({ error: { message: "Invalid query params", details: parsed.error.flatten() }, data: null });
   }
 
-  const reviewableCategories = await getReviewableCategoriesForUser(req.user);
-  const includeUnmapped = await canUserReviewUnmappedCategories(req.user);
+  const accessibleCategories = await getAccessibleCategoriesForUser(req.user);
+  const includeUnmapped = await canUserAccessUnmappedCategoriesForList(req.user);
 
-  if (reviewableCategories.length === 0 && !includeUnmapped) {
-    return res.status(200).json({
-      error: null,
-      data: {
-        submissions: [],
-        pagination: { page: 1, per_page: 0, total: 0, total_pages: 0 },
-      },
+  if (parsed.data.category !== undefined) {
+    const canAccess = await canUserAccessCategoryForList(req.user, parsed.data.category);
+    if (!canAccess) {
+      return res.status(200).json({
+        error: null,
+        data: buildEmptyListResult(parsed.data.page, parsed.data.per_page),
+      });
+    }
+
+    return handleListApprovalSubmissions(res, {
+      ...buildListFilters(parsed.data),
+      ...(parsed.data.category !== undefined ? { categoryFilter: parsed.data.category } : {}),
+      listAccessUser: req.user,
     });
   }
 
-  if (parsed.data.category !== undefined) {
-    const canReview = await canUserReviewCategory(req.user, parsed.data.category);
-    if (!canReview) {
-      return res
-        .status(403)
-        .json({ error: { message: "You are not allowed to list this category" }, data: null });
-    }
+  if (accessibleCategories.length === 0 && !includeUnmapped) {
+    return res.status(200).json({
+      error: null,
+      data: buildEmptyListResult(parsed.data.page, parsed.data.per_page),
+    });
   }
 
   return handleListApprovalSubmissions(res, {
     ...buildListFilters(parsed.data),
-    reviewScope: { reviewableCategories, includeUnmapped },
+    accessScope: { accessibleCategories, includeUnmapped },
+    listAccessUser: req.user,
   });
 };
 
@@ -521,9 +651,23 @@ export const listMyApprovalSubmissions = async (
       .json({ error: { message: "Invalid query params", details: parsed.error.flatten() }, data: null });
   }
 
-  return handleListApprovalSubmissions(res, buildListFilters(parsed.data, {
-    forceRequestedBy: Number(req.user.id),
-  }));
+  if (parsed.data.category !== undefined) {
+    const canAccess = await canUserAccessCategoryForList(req.user, parsed.data.category);
+    if (!canAccess) {
+      return res.status(200).json({
+        error: null,
+        data: buildEmptyListResult(parsed.data.page, parsed.data.per_page),
+      });
+    }
+  }
+
+  return handleListApprovalSubmissions(res, {
+    ...buildListFilters(parsed.data, {
+      forceRequestedBy: Number(req.user.id),
+    }),
+    ...(parsed.data.category !== undefined ? { categoryFilter: parsed.data.category } : {}),
+    listAccessUser: req.user,
+  });
 };
 
 export const getApprovalSubmission = async (
@@ -601,6 +745,11 @@ export const createApprovalSubmission = async (
     return res
       .status(403)
       .json({ error: { message: "Unauthorized" }, data: null });
+  }
+
+  const createAuth = await assertCanCreateSubmission(req.user, category);
+  if (!createAuth.allowed) {
+    return res.status(403).json({ error: { message: createAuth.message }, data: null });
   }
 
   const itemAttributes: {
@@ -723,6 +872,11 @@ export const createApprovalSubmissionItem = async (
       return res
         .status(403)
         .json({ error: { message: "Only the submission requester can add items" }, data: null });
+    }
+
+    const createAuth = await assertCanCreateSubmission(req.user, submissionData.category);
+    if (!createAuth.allowed) {
+      return res.status(403).json({ error: { message: createAuth.message }, data: null });
     }
 
     const categoryValidation = validateItemsForCategory(
@@ -856,14 +1010,22 @@ export const updateApprovalSubmissionItemStatus = async (
       return res.status(404).json({ error: { message: "Approval submission not found" }, data: null });
     }
 
-    const submissionData = submission.toJSON() as { status: ApprovalSubmissionStatus; category: string | null };
+    const submissionData = submission.toJSON() as {
+      status: ApprovalSubmissionStatus;
+      category: string | null;
+      requestedBy: number;
+    };
     if (submissionData.status !== "PENDING" && submissionData.status !== "PARTIALLY_APPROVED") {
       return res
         .status(400)
         .json({ error: { message: "Only items on pending or partially approved submissions can be reviewed" }, data: null });
     }
 
-    const reviewAuth = await assertCanReviewSubmission(req.user, submissionData.category);
+    const reviewAuth = await assertCanReviewSubmission(
+      req.user,
+      submissionData.category,
+      submissionData.requestedBy
+    );
     if (!reviewAuth.allowed) {
       return res.status(403).json({ error: { message: reviewAuth.message }, data: null });
     }
@@ -954,7 +1116,11 @@ export const updateApprovalSubmissionStatus = async (
 
       await submission.update({ status: "CANCELLED" });
     } else if (RENO_REVIEW_STATUSES.has(status)) {
-      const reviewAuth = await assertCanReviewSubmission(req.user, submissionData.category);
+      const reviewAuth = await assertCanReviewSubmission(
+        req.user,
+        submissionData.category,
+        submissionData.requestedBy
+      );
       if (!reviewAuth.allowed) {
         return res.status(403).json({ error: { message: reviewAuth.message }, data: null });
       }
@@ -970,7 +1136,7 @@ export const updateApprovalSubmissionStatus = async (
     }
 
     const submissionWithRequester = await ApprovalSubmission.findByPk(id, {
-      include: [approvalSubmissionRequesterInclude],
+      include: [approvalSubmissionRequesterInclude, approvalSubmissionReviewerInclude],
     });
 
     void notifyApprovalSubmissionStatusChange(id, status);
