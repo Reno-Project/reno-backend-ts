@@ -52,6 +52,10 @@ import {
 
 const RENO_REVIEW_STATUSES = new Set(["APPROVED", "PARTIALLY_APPROVED", "REJECTED"]);
 
+// contextId is a project id only for these context types; for the rest (CHANGE_REQUEST,
+// DELIVERY_MEMO, ...) it is the id of that entity, so the joined project must be ignored.
+const PROJECT_CONTEXT_TYPES = new Set(["PROJECT", "CONTRACTOR_PAYOUT_PROJECT"]);
+
 const approvalSubmissionItemsInclude = {
   model: ApprovalSubmissionItem,
   as: "items",
@@ -219,8 +223,11 @@ function serializeSubmissionWithItems(
     project,
     ...submission
   } = json;
+  const isProjectContext = PROJECT_CONTEXT_TYPES.has(
+    String(submission.contextType ?? "").toUpperCase()
+  );
   const projectName =
-    typeof project?.name === "string" && project.name.trim().length > 0
+    isProjectContext && typeof project?.name === "string" && project.name.trim().length > 0
       ? project.name.trim()
       : null;
 
