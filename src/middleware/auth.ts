@@ -72,6 +72,7 @@ export const verifyToken = async (req: Request, res: AuthResponse, next: NextFun
 
   const payload = verify(token);
   if (!payload) {
+    console.log(payload)
     return sendAuthError(res, 403, messages.PAYLOAD_NOT_FOUND);
   }
 

@@ -12,6 +12,12 @@ export type ApprovalSubmissionRequesterDTO = {
   is_block: number;
 };
 
+export type ApprovalSubmissionReviewerDTO = {
+  user_id: number;
+  username: string | null;
+  email: string | null;
+};
+
 export type ApprovalSubmissionDTO = {
   id: number;
   category: string | null;
@@ -22,7 +28,7 @@ export type ApprovalSubmissionDTO = {
   requestedAt: string;
   requestNote: string | null;
   requestPayload: string | null;
-  reviewedBy: number | null;
+  reviewedBy: ApprovalSubmissionReviewerDTO | null;
   reviewedAt: string | null;
   reviewNote: string | null;
 };
@@ -49,8 +55,11 @@ export type ApprovalSubmissionWithItemsDTO = ApprovalSubmissionDTO & {
   items: ApprovalSubmissionItemDTO[];
 };
 
+export type ApprovalSubmissionListPermission = "create" | "review";
+
 export type ListApprovalSubmissionsDTO = {
   submissions: ApprovalSubmissionWithItemsDTO[];
+  perms: ApprovalSubmissionListPermission[];
   pagination: {
     page: number;
     per_page: number;
