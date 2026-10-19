@@ -1,11 +1,10 @@
 # Build once, deploy to both RENO and EGP production backends from main
 #
-# NAPOMENA o dva razlicita metoda autentikacije:
-#   RENO -> OIDC (azure/login sa service principal-om) - postojeci setup, ne diramo
-#   EGP  -> publish profile - jer GitHub service principal nema RBAC dozvolu
-#           na reno-ts-backend-egp, a za dodelu role treba Owner.
-#   Kada neko sa Owner rolom doda service principal-u "Contributor" na EGP app,
-#   moze se preci na OIDC i za EGP (obrisati publish-profile liniju + if uslove).
+# NAPOMENA o autentikaciji:
+#   Oba app-a (RENO i EGP) se deployuju preko publish profile-a, svaki sa svojim
+#   secret-om iz matrix-a. OIDC identiteti su obrisani sa migracijom tenanta, pa
+#   RENO vise nema sa cim da se uloguje preko azure/login. OIDC koraci su ostavljeni
+#   ali se ne izvrsavaju (nijedan matrix unos nema auth: 'oidc').
 
 name: Build and deploy Node.js app to Azure - PROD RENO + EGP
 
@@ -54,10 +53,12 @@ jobs:
         include:
           - name: reno
             app-name: 'reno-backend-ts-prod'
-            auth: 'oidc'
+            auth: 'publish-profile'
+            profile-secret: 'AZUREAPPSERVICE_PUBLISHPROFILE_PROD'
           - name: egp
             app-name: 'reno-ts-backend-egp'
             auth: 'publish-profile'
+            profile-secret: 'AZUREAPPSERVICE_PUBLISHPROFILE_EGP_PROD'
 
     name: Deploy PROD (${{ matrix.name }})
 
@@ -84,7 +85,7 @@ jobs:
           slot-name: 'Production'
           package: .
 
-      # --- EGP: publish profile ---
+      # --- publish profile (oba app-a) ---
       - name: 'Deploy via publish profile - ${{ matrix.name }}'
         if: matrix.auth == 'publish-profile'
         uses: azure/webapps-deploy@v3
@@ -92,4 +93,4 @@ jobs:
           app-name: ${{ matrix.app-name }}
           slot-name: 'Production'
           package: .
-          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_EGP_PROD }}
+          publish-profile: ${{ secrets[matrix.profile-secret] }}
