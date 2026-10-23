@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "./instrument";
 import Logger from "./utils/logger";
 import { port } from "./config";
 import app from "./app";
