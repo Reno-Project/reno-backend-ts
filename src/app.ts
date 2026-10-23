@@ -1,3 +1,4 @@
+import Sentry from "./instrument";
 import express, { type NextFunction, type Request, type Response } from "express";
 import cors from "cors";
 import swaggerUi from "swagger-ui-express";
@@ -38,5 +39,7 @@ app.get("/health", isReno, (_req: Request, res: Response) => {
     }
   });
 });
+
+Sentry.setupExpressErrorHandler(app);
 
 export default app;
