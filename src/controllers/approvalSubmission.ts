@@ -36,6 +36,7 @@ import { notifyPayoutModificationRequest } from "../services/payoutModificationE
 import Logger from "../utils/logger";
 import db from "../utils/db";
 import { z } from "zod";
+import { errorDetails } from "../utils/errorDetails";
 import {
   approvalSubmissionIdParamSchema,
   approvalSubmissionItemIdParamSchema,
@@ -418,7 +419,7 @@ async function reviewAllItems(
     Logger.error(e);
     return res
       .status(500)
-      .json({ error: { message: "Something went wrong", details: e }, data: null });
+      .json({ error: { message: "Something went wrong", details: errorDetails(e) }, data: null });
   }
 }
 
@@ -591,7 +592,7 @@ async function handleListApprovalSubmissions(
     Logger.error(e);
     return res
       .status(500)
-      .json({ error: { message: "Something went wrong", details: e }, data: null });
+      .json({ error: { message: "Something went wrong", details: errorDetails(e) }, data: null });
   }
 }
 
@@ -720,7 +721,7 @@ export const getApprovalSubmission = async (
     Logger.error(e);
     return res
       .status(500)
-      .json({ error: { message: "Something went wrong", details: e }, data: null });
+      .json({ error: { message: "Something went wrong", details: errorDetails(e) }, data: null });
   }
 };
 
@@ -829,7 +830,7 @@ export const createApprovalSubmission = async (
     Logger.error(e);
     return res
       .status(500)
-      .json({ error: { message: "Something went wrong", details: e }, data: null });
+      .json({ error: { message: "Something went wrong", details: errorDetails(e) }, data: null });
   }
 };
 
@@ -915,7 +916,7 @@ export const createApprovalSubmissionItem = async (
     Logger.error(e);
     return res
       .status(500)
-      .json({ error: { message: "Something went wrong", details: e }, data: null });
+      .json({ error: { message: "Something went wrong", details: errorDetails(e) }, data: null });
   }
 };
 
@@ -970,7 +971,7 @@ export const getApprovalSubmissionItem = async (
     Logger.error(e);
     return res
       .status(500)
-      .json({ error: { message: "Something went wrong", details: e }, data: null });
+      .json({ error: { message: "Something went wrong", details: errorDetails(e) }, data: null });
   }
 };
 
@@ -1067,7 +1068,7 @@ export const updateApprovalSubmissionItemStatus = async (
     Logger.error(e);
     return res
       .status(500)
-      .json({ error: { message: "Something went wrong", details: e }, data: null });
+      .json({ error: { message: "Something went wrong", details: errorDetails(e) }, data: null });
   }
 };
 
@@ -1158,6 +1159,6 @@ export const updateApprovalSubmissionStatus = async (
     Logger.error(e);
     return res
       .status(500)
-      .json({ error: { message: "Something went wrong", details: e }, data: null });
+      .json({ error: { message: "Something went wrong", details: errorDetails(e) }, data: null });
   }
 };

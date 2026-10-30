@@ -7,6 +7,7 @@ import db from "../utils/db";
 import { type MessageDTO, type MessageWithUserDTO } from "../types/conversation/responses";
 import { type APIResponse } from "../types/utils/api";
 import { createMessageSchema, listMessagesSchema } from "../validation/message";
+import { errorDetails } from "../utils/errorDetails";
 
 export const createMessage = async (
   req: Request,
@@ -30,7 +31,7 @@ export const createMessage = async (
     return res.status(200).json({ error: null, data: message.toJSON() as MessageDTO });
   } catch(e) {
     Logger.error(e);
-    return res.status(500).json({ error: { message: "Something went wrong", details: e }, data: null });
+    return res.status(500).json({ error: { message: "Something went wrong", details: errorDetails(e) }, data: null });
   }
  
 };
