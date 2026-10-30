@@ -7,6 +7,8 @@ import messageRouter from "./routes/message";
 import approvalSubmissionRouter from "./routes/approvalSubmission";
 import leanWebhookRouter from "./routes/leanWebhook";
 import { isReno } from "./middleware/auth";
+import Logger from "./utils/logger";
+import { errorDetails } from "./utils/errorDetails";
 
 const app = express();
 
@@ -36,6 +38,19 @@ app.get("/health", isReno, (_req: Request, res: Response) => {
     data: {
       message: "Health route ready"
     }
+  });
+});
+
+app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  Logger.error(err);
+
+  if (res.headersSent) {
+    return;
+  }
+
+  res.status(500).json({
+    error: { message: "Something went wrong", details: errorDetails(err) },
+    data: null,
   });
 });
 
